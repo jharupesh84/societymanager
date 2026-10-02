@@ -324,15 +324,15 @@ fun BatchCollectionReviewDialog(
 }
 
 class MutableCollectionRow(
-    initialBlock: String,
-    initialFlatNo: String,
-    initialOwnerName: String,
-    initialAmount: String,
-    initialPaymentMode: String
+    block: String = "General",
+    flatNo: String = "",
+    ownerName: String = "",
+    amount: String = "",
+    paymentMode: String = "Online"
 ) {
-    var block by mutableStateOf(initialBlock)
-    var flatNo by mutableStateOf(initialFlatNo)
-    var ownerName by mutableStateOf(initialOwnerName)
-    var amount by mutableStateOf(initialAmount)
-    var paymentMode by mutableStateOf(initialPaymentMode)
+    var block by mutableStateOf(block)
+    var flatNo by mutableStateOf(flatNo)
+    var ownerName by mutableStateOf(ownerName)
+    var amount by mutableStateOf(amount)
+    var paymentMode by mutableStateOf(paymentMode)
 }
