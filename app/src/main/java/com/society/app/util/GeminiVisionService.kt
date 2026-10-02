@@ -65,9 +65,9 @@ object GeminiVisionService {
                 Extract every collection row into a clean JSON array.
                 
                 Block & Flat Number Rules:
-                1. Inspect the document header/title at the top (e.g. "MAINTENANCE: 'G' BLOCK", "'G' BLOCK", "BLOCK G", "WING A").
+                1. Inspect the document header/title at the top (e.g. "MAINTENANCE: 'G' BLOCK", "BLOCK: B", "WING C", "'A' BLOCK", "BLOCK - D").
                    If a single block is specified in the header/title and table rows only list numeric flat numbers (e.g. 101, 102, 302, 503),
-                   assign that header block (e.g. "G") to all those flats and format flatNo as "G-101", "G-102", "G-302", "G-503", etc.
+                   assign that detected header block to all those flats (e.g. for Block B -> "B-302", "B-304"; for Block C -> "C-301"; for Block G -> "G-102", "G-302").
                 2. If the sheet contains flats from multiple blocks (e.g. A-101, B-202, C-303, G-102) or has a dedicated Block column with varying letters,
                    extract the specific block and flat number for each row individually.
                 3. Ignore serial numbers (1, 2, ..., 20), column headers, and society address/title lines (e.g. Arya Krishna Enclave, Saijpur Bogha).

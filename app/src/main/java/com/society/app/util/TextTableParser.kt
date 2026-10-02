@@ -27,27 +27,27 @@ object TextTableParser {
 
         val headerSection = fullText.lines().take(10).joinToString("\n")
 
-        // Pattern 1: 'G' BLOCK, "G" BLOCK, or MAINTENANCE: 'G' BLOCK, MAINTENANCE: 'G' BLOCK - 20
-        val regex1 = Regex("""(?:MAINTENANCE|COLLECTION)?[:\s]*['"‘“]([A-Za-z0-9])['"’”]\s*[-/_]?\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
-        val match1 = regex1.find(headerSection)
-        if (match1 != null) {
-            val b = match1.groupValues[1].uppercase()
+        // Pattern 1: BLOCK/WING followed by letter (e.g. "BLOCK: B", "BLOCK - B", "BLOCK B", "BLOCK 'C'", "WING: A", "WING C")
+        val regexBlockFirst = Regex("""(?:MAINTENANCE|COLLECTION)?[:\s]*(?:BLOCK|WING)\s*[:\-_/]?\s*['"‘“]?([A-Za-z0-9])['"’”]?\b""", RegexOption.IGNORE_CASE)
+        val matchBlockFirst = regexBlockFirst.find(headerSection)
+        if (matchBlockFirst != null) {
+            val b = matchBlockFirst.groupValues[1].uppercase()
             if (b.isNotBlank()) return b
         }
 
-        // Pattern 2: Standalone quoted letter followed by BLOCK anywhere in header
-        val regex2 = Regex("""['"‘“]([A-Za-z0-9])['"’”]\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
-        val match2 = regex2.find(headerSection)
-        if (match2 != null) {
-            val b = match2.groupValues[1].uppercase()
-            if (b.isNotBlank()) return b
+        // Pattern 2: Quoted or unquoted letter followed by BLOCK/WING (e.g. "'B' BLOCK", "'G' BLOCK", "B BLOCK", "C BLOCK", "A WING")
+        val regexLetterFirst = Regex("""(?:MAINTENANCE|COLLECTION)?[:\s]*['"‘“]?([A-Za-z0-9])['"’”]?\s*[-/_]?\s*(?:BLOCK|WING)\b""", RegexOption.IGNORE_CASE)
+        val matchLetterFirst = regexLetterFirst.find(headerSection)
+        if (matchLetterFirst != null) {
+            val b = matchLetterFirst.groupValues[1].uppercase()
+            if (b.isNotBlank() && b !in listOf("NO", "OF", "THE")) return b
         }
 
-        // Pattern 3: Explicit MAINTENANCE / COLLECTION title with BLOCK / WING
-        val regex3 = Regex("""(?:MAINTENANCE|COLLECTION)\s*[:\-_]?\s*(?:BLOCK|WING)?\s*[:\-_]?\s*['"‘“]?([A-Za-z0-9])['"’”]?\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
-        val match3 = regex3.find(headerSection)
-        if (match3 != null) {
-            val b = match3.groupValues[1].uppercase()
+        // Pattern 3: Standalone quoted letter in the header line (e.g. "'B'", "'C'", "'G'")
+        val regexQuoted = Regex("""['"‘“]([A-Za-z0-9])['"’”]""", RegexOption.IGNORE_CASE)
+        val matchQuoted = regexQuoted.find(headerSection)
+        if (matchQuoted != null) {
+            val b = matchQuoted.groupValues[1].uppercase()
             if (b.isNotBlank()) return b
         }
 
