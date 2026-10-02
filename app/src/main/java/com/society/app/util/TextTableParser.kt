@@ -6,67 +6,12 @@ package com.society.app.util
  */
 object TextTableParser {
 
-    val SAMPLE_TABLE_TEXT = """
-        B, B-504, Rupesh Jha, 2100, Online
-        G, G-302, Kamlesh Agrawal, 1500, Online
-        C, C-504, Nitish Jha, 1500, Online
-        G, G-503, R K Dubey, 1500, Online
-        A, A-501, Sanotsh Mishra, 2100, Cash
-        B, B-402, Rajesh Hirwani, 1501, Online
-        F, F-101, Rakhi Pandey, 1200, Online
-        B, B-502, Jitendra Ji, 1200, Online
-        B, B-401, Parul Biswas, 1501, Online
-        E, E-502, Rakesh Kumar Pal, 1200, Online
-        G, G-102, Rahul Chavada, 1200, Cash
-        G, G-303, Pratap Bhai, 1200, Cash
-    """.trimIndent()
-
     /**
-     * Inspects the document header (first 12 lines) to detect if the entire sheet belongs to a specific block.
-     * Examples:
-     * - "MAINTENANCE: 'G' BLOCK - 20" -> "G"
-     * - "MAINTENANCE : 'G' BLOCK" -> "G"
-     * - "'G' BLOCK" -> "G"
-     * - "BLOCK: B" or "BLOCK - B" -> "B"
-     * - "BLOCK G" or "WING A" -> "G" or "A"
+     * Parses raw pasted text or OCR text into collection rows using the user-selected block.
+     * Every flat (e.g. "101", "102", "302") is assigned the selected block and formatted as e.g. "G-101", "G-102".
      */
-    fun detectHeaderBlock(fullText: String): String? {
-        val headerSection = fullText.lines().take(12).joinToString("\n")
-
-        // Pattern 1: 'G' BLOCK, "G" BLOCK, or MAINTENANCE: 'G' BLOCK
-        val regex1 = Regex("""(?:MAINTENANCE|COLLECTION)?[:\s]*['"‘“]?([A-Za-z0-9])['"’”]?\s*[-/_]?\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
-        val match1 = regex1.find(headerSection)
-        if (match1 != null) {
-            val b = match1.groupValues[1].uppercase()
-            if (b.isNotBlank()) return b
-        }
-
-        // Pattern 2: BLOCK: G, BLOCK - G, BLOCK 'G', BLOCK "G", BLOCK G, WING: A
-        val regex2 = Regex("""(?:BLOCK|WING)\s*[:\-_]?\s*['"‘“]?([A-Za-z0-9])['"’”]?\b""", RegexOption.IGNORE_CASE)
-        val match2 = regex2.find(headerSection)
-        if (match2 != null) {
-            val b = match2.groupValues[1].uppercase()
-            if (b.isNotBlank()) return b
-        }
-
-        // Pattern 3: Standalone quoted letter followed by BLOCK anywhere in header
-        val regex3 = Regex("""['"‘“]([A-Za-z0-9])['"’”]\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
-        val match3 = regex3.find(headerSection)
-        if (match3 != null) {
-            val b = match3.groupValues[1].uppercase()
-            if (b.isNotBlank()) return b
-        }
-
-        return null
-    }
-
-    /**
-     * Parses raw pasted text or OCR text into collection rows.
-     * If forcedBlock or a header block (e.g. 'G') is found, flats without a block prefix
-     * like "101", "102", "302" are assigned that block and formatted as "G-101", "G-102", etc.
-     */
-    fun parse(rawText: String, forcedBlock: String? = null): List<ParsedCollectionRow> {
-        val detectedBlock = forcedBlock?.ifBlank { null } ?: detectHeaderBlock(rawText)
+    fun parse(rawText: String, targetBlock: String? = null): List<ParsedCollectionRow> {
+        val cleanTargetBlock = targetBlock?.trim()?.uppercase()?.ifBlank { null }
         val lines = rawText.lines()
         val result = mutableListOf<ParsedCollectionRow>()
 
@@ -77,7 +22,7 @@ object TextTableParser {
             // Skip title/header/footer rows
             if (isHeaderOrTitleLine(trimmed)) continue
 
-            val row = parseLine(trimmed, detectedBlock)
+            val row = parseLine(trimmed, cleanTargetBlock)
             if (row != null) {
                 result.add(row)
             }
@@ -254,10 +199,10 @@ object TextTableParser {
             nameStr = "Resident"
         }
 
-        // Determine effective block: row's explicit block > document header / forced block > default "A"
+        // Determine effective block: explicit target block takes priority
         val effectiveBlock = when {
-            blockStr.isNotBlank() && blockStr != "General" -> blockStr
             !defaultBlock.isNullOrBlank() -> defaultBlock.uppercase()
+            blockStr.isNotBlank() && blockStr != "General" -> blockStr
             flatStr.contains("-") -> flatStr.substringBefore("-").trim().uppercase()
             else -> "A"
         }

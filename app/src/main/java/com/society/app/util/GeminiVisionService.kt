@@ -60,11 +60,12 @@ object GeminiVisionService {
             val base64Image = uriToBase64Jpeg(context, imageUri)
                 ?: return@withContext Result.failure(Exception("Failed to decode image from device."))
 
-            val blockInstruction = if (!forcedBlock.isNullOrBlank()) {
-                "The user has specified that the block for this sheet is '$forcedBlock'. For any flat without a block letter (e.g. '101', '102', '302'), set block as '$forcedBlock' and flatNo as '$forcedBlock-101', '$forcedBlock-102', etc."
-            } else {
-                "Check the heading/title of the document (e.g. \"MAINTENANCE: 'G' BLOCK\" or \"BLOCK G\"). If a block is mentioned in the heading and flat numbers in the table are just numbers (e.g. '101', '102', '302'), use that block letter (e.g. 'G') for all those flats and format flatNo as 'G-101', 'G-102', etc."
-            }
+            val targetBlock = forcedBlock?.trim()?.uppercase()?.ifBlank { "G" } ?: "G"
+            val blockInstruction = """
+                This entire sheet belongs to Block '$targetBlock'.
+                For every row, set "block" to "$targetBlock".
+                Every flat number must be formatted with this block prefix, e.g. "$targetBlock-101", "$targetBlock-102", "$targetBlock-302", etc.
+            """.trimIndent()
 
             val prompt = """
                 You are an expert OCR and financial data extraction assistant for a housing society in India.

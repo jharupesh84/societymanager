@@ -45,14 +45,13 @@ object MlKitOcrService {
                     }
             }
 
-            // Auto-detect block from header (e.g. "MAINTENANCE: 'G' BLOCK-") or use user-specified forced block
-            val detectedBlock = forcedBlock?.ifBlank { null } ?: TextTableParser.detectHeaderBlock(visionText.text)
+            val targetBlock = forcedBlock?.trim()?.uppercase()?.ifBlank { "G" } ?: "G"
 
             // Strategy 1: Parse visionText.text directly
-            val rowsFromRaw = TextTableParser.parse(visionText.text, detectedBlock)
+            val rowsFromRaw = TextTableParser.parse(visionText.text, targetBlock)
 
             // Strategy 2: Reconstruct rows by clustering line bounding boxes by vertical Y-center
-            val rowsFromClustering = parseByRowClustering(visionText, detectedBlock)
+            val rowsFromClustering = parseByRowClustering(visionText, targetBlock)
 
             val finalRows = if (rowsFromClustering.size >= rowsFromRaw.size && rowsFromClustering.isNotEmpty()) {
                 rowsFromClustering

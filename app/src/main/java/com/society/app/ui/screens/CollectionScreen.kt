@@ -39,7 +39,6 @@ import com.society.app.ui.dialogs.BatchCollectionReviewDialog
 import com.society.app.ui.dialogs.PasteTextTableDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 import com.society.app.util.DateUtil
-import com.society.app.util.SampleImageHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -159,36 +158,20 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
             text = { Text(errText, fontSize = 14.sp) },
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Quick option to retry with Offline ML Kit OCR!
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.clearAiScanState()
-                            val sampleUri = SampleImageHelper.getSampleTableImageUri(context)
-                            if (sampleUri != null) {
-                                viewModel.scanCollectionImage(
-                                    context,
-                                    sampleUri,
-                                    forceEngine = SocietyViewModel.ScanEngine.OFFLINE_MLKIT
-                                )
-                            }
+                    if (scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD) {
+                        Button(
+                            onClick = {
+                                viewModel.clearAiScanState()
+                                showApiKeyDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                        ) {
+                            Text("Check Key")
                         }
-                    ) {
-                        Text("Try Offline OCR")
                     }
-                    Button(
-                        onClick = {
-                            viewModel.clearAiScanState()
-                            showApiKeyDialog = true
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
-                    ) {
-                        Text("Check Key")
+                    TextButton(onClick = { viewModel.clearAiScanState() }) {
+                        Text("Dismiss")
                     }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.clearAiScanState() }) {
-                    Text("Dismiss")
                 }
             }
         )
@@ -364,7 +347,6 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                     // Block Selector for Upload
                     var blockDropdownExpanded by remember { mutableStateOf(false) }
                     val blockOptions = listOf(
-                        "All Blocks (Auto-Detect)",
                         "Block G",
                         "Block A",
                         "Block B",

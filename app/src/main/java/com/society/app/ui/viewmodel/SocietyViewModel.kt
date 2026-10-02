@@ -332,7 +332,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
-    private val _uploadBlockOption = MutableStateFlow("All Blocks (Auto-Detect)")
+    private val _uploadBlockOption = MutableStateFlow("Block G")
     val uploadBlockOption: StateFlow<String> = _uploadBlockOption.asStateFlow()
 
     fun setUploadBlockOption(option: String) {
@@ -372,11 +372,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     ) {
         val engine = forceEngine ?: _scanEngine.value
         val blockChoice = forceBlock ?: _uploadBlockOption.value
-        val blockParam = if (blockChoice.contains("All", ignoreCase = true) || blockChoice.contains("Auto", ignoreCase = true)) {
-            null
-        } else {
-            blockChoice.removePrefix("Block").removePrefix("Wing").trim().uppercase()
-        }
+        val blockParam = blockChoice.removePrefix("Block").removePrefix("Wing").trim().uppercase().ifBlank { "G" }
 
         viewModelScope.launch {
             _isAiScanning.value = true

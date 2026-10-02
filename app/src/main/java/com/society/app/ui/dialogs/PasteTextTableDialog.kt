@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material3.*
@@ -90,30 +89,6 @@ fun PasteTextTableDialog(
                     shape = RoundedCornerShape(12.dp)
                 )
 
-                // Quick Helper Button: Load Sample Data
-                OutlinedButton(
-                    onClick = {
-                        rawText = TextTableParser.SAMPLE_TABLE_TEXT
-                        errorMessage = null
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = Color(0xFF0284C7)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "⚡ Load 12-Flat Sample Data",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF0284C7)
-                    )
-                }
-
                 errorMessage?.let {
                     Text(
                         text = it,
@@ -134,7 +109,7 @@ fun PasteTextTableDialog(
                     Button(
                         onClick = {
                             if (rawText.isBlank()) {
-                                errorMessage = "Please paste some table text or load sample data."
+                                errorMessage = "Please paste some table text."
                                 return@Button
                             }
                             val rows = TextTableParser.parse(rawText)
