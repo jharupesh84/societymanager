@@ -211,6 +211,16 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         return Pair("General", trimmed)
     }
 
+    fun normalizeFlatKey(block: String, flatNo: String): String {
+        val cleanBlock = block.trim().uppercase()
+        val cleanFlat = flatNo.trim().uppercase().replace(" ", "").replace("-", "")
+        return if (cleanBlock.isNotBlank() && !cleanFlat.startsWith(cleanBlock)) {
+            "$cleanBlock$cleanFlat"
+        } else {
+            cleanFlat
+        }
+    }
+
     fun addCollectionFromCombinedInput(
         rawFlatInput: String,
         ownerName: String,
@@ -223,6 +233,31 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         viewModelScope.launch {
             val currentDate = DateUtil.getCurrentDate()
             val finalMonth = if (monthYear.isNotBlank()) monthYear else DateUtil.getCurrentMonthYear()
+            val targetKey = normalizeFlatKey(block, flatNo)
+
+            val existingList = repository.getExistingCollections(category, finalMonth)
+            val existing = existingList.find { normalizeFlatKey(it.block, it.flatNo) == targetKey }
+
+            if (existing != null) {
+                if (kotlin.math.abs(existing.amount - amount) < 0.01) {
+                    // Same amount -> Ignore duplicate
+                    _statusMessage.value = "Duplicate ignored: Flat $flatNo already has ₹$amount recorded for $finalMonth."
+                    return@launch
+                } else {
+                    // Different amount -> Update existing record
+                    val updated = existing.copy(
+                        amount = amount,
+                        ownerName = ownerName.trim().ifBlank { existing.ownerName },
+                        paymentMode = paymentMode,
+                        date = currentDate,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    repository.updateCollection(updated)
+                    _statusMessage.value = "Updated Flat $flatNo amount to ₹$amount for $finalMonth (was ₹${existing.amount})."
+                    return@launch
+                }
+            }
+
             val item = CollectionEntity(
                 category = category,
                 monthYear = finalMonth,
@@ -234,6 +269,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                 date = currentDate
             )
             repository.addCollection(item)
+            _statusMessage.value = "Saved collection for Flat $flatNo (₹$amount)."
         }
     }
 
@@ -292,6 +328,13 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
 
     private val _scannedExpense = MutableStateFlow<ParsedExpenseRow?>(null)
     val scannedExpense: StateFlow<ParsedExpenseRow?> = _scannedExpense.asStateFlow()
+
+    private val _statusMessage = MutableStateFlow<String?>(null)
+    val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+
+    fun clearStatusMessage() {
+        _statusMessage.value = null
+    }
 
     fun setScanEngine(engine: ScanEngine) {
         _scanEngine.value = engine
@@ -381,20 +424,85 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     ) {
         viewModelScope.launch {
             val currentDate = DateUtil.getCurrentDate()
-            val entities = items.map { item ->
-                CollectionEntity(
-                    category = targetCategory,
-                    monthYear = targetMonthYear,
-                    block = item.block.ifBlank { "General" },
-                    flatNo = item.flatNo,
-                    ownerName = item.ownerName.ifBlank { "Resident" },
-                    amount = item.amount,
-                    paymentMode = item.paymentMode,
-                    date = currentDate
-                )
+            val existingList = repository.getExistingCollections(targetCategory, targetMonthYear)
+            val existingMap = existingList.associateBy { normalizeFlatKey(it.block, it.flatNo) }
+
+            var insertedCount = 0
+            var updatedCount = 0
+            var ignoredCount = 0
+
+            val toInsert = mutableListOf<CollectionEntity>()
+            val toUpdate = mutableListOf<CollectionEntity>()
+
+            val processedBatchKeys = mutableMapOf<String, ParsedCollectionRow>()
+
+            for (item in items) {
+                val block = item.block.ifBlank { "General" }
+                val flatNo = item.flatNo
+                val key = normalizeFlatKey(block, flatNo)
+
+                val prevInBatch = processedBatchKeys[key]
+                if (prevInBatch != null && kotlin.math.abs(prevInBatch.amount - item.amount) < 0.01) {
+                    ignoredCount++
+                    continue
+                }
+                processedBatchKeys[key] = item
+
+                val existing = existingMap[key]
+
+                if (existing != null) {
+                    if (kotlin.math.abs(existing.amount - item.amount) < 0.01) {
+                        // Same amount -> Ignore duplicate
+                        ignoredCount++
+                    } else {
+                        // Different amount -> Update existing record
+                        toUpdate.add(
+                            existing.copy(
+                                amount = item.amount,
+                                ownerName = item.ownerName.ifBlank { existing.ownerName },
+                                paymentMode = item.paymentMode,
+                                date = currentDate,
+                                timestamp = System.currentTimeMillis()
+                            )
+                        )
+                        updatedCount++
+                    }
+                } else {
+                    // New record -> Insert
+                    toInsert.add(
+                        CollectionEntity(
+                            category = targetCategory,
+                            monthYear = targetMonthYear,
+                            block = block,
+                            flatNo = flatNo,
+                            ownerName = item.ownerName.ifBlank { "Resident" },
+                            amount = item.amount,
+                            paymentMode = item.paymentMode,
+                            date = currentDate
+                        )
+                    )
+                    insertedCount++
+                }
             }
-            repository.addCollections(entities)
+
+            if (toInsert.isNotEmpty()) {
+                repository.addCollections(toInsert)
+            }
+            if (toUpdate.isNotEmpty()) {
+                repository.updateCollections(toUpdate)
+            }
+
             clearAiScanState()
+
+            val msg = buildString {
+                append("Import complete: ")
+                val parts = mutableListOf<String>()
+                if (insertedCount > 0) parts.add("$insertedCount added")
+                if (updatedCount > 0) parts.add("$updatedCount updated")
+                if (ignoredCount > 0) parts.add("$ignoredCount duplicates ignored")
+                if (parts.isEmpty()) append("No records processed.") else append(parts.joinToString(", "))
+            }
+            _statusMessage.value = msg
         }
     }
 

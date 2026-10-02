@@ -122,7 +122,7 @@ object GeminiVisionService {
         }
     }
 
-    private fun isModelUnavailableError(msg: String): Boolean {
+    private fun isFallbackEligibleError(msg: String): Boolean {
         val lower = msg.lowercase()
         return lower.contains("not found") ||
                 lower.contains("404") ||
@@ -132,7 +132,16 @@ object GeminiVisionService {
                 lower.contains("unsupported") ||
                 lower.contains("not supported") ||
                 lower.contains("invalid model") ||
-                lower.contains("unknown model")
+                lower.contains("unknown model") ||
+                lower.contains("high demand") ||
+                lower.contains("spikes in demand") ||
+                lower.contains("overloaded") ||
+                lower.contains("temporarily unavailable") ||
+                lower.contains("resource_exhausted") ||
+                lower.contains("resource exhausted") ||
+                lower.contains("rate limit") ||
+                lower.contains("503") ||
+                lower.contains("429")
     }
 
     private fun extractSuggestedModel(errorMessage: String): String? {
@@ -160,7 +169,7 @@ object GeminiVisionService {
                     } catch (_: Exception) {}
                 }
 
-                if (!isModelUnavailableError(msg)) {
+                if (!isFallbackEligibleError(msg)) {
                     throw e
                 }
             }
@@ -168,7 +177,7 @@ object GeminiVisionService {
 
         var lastError: Exception? = null
 
-        // 2. Iterate through candidate models (starting with gemini-3.8-flash)
+        // 2. Iterate through candidate models (gemini-3.8-flash, gemini-2.5-flash, gemini-1.5-flash, etc.)
         for (model in CANDIDATE_MODELS) {
             try {
                 val res = executeGenerateContent(apiKey, model, prompt, base64Jpeg)
@@ -190,7 +199,7 @@ object GeminiVisionService {
                     }
                 }
 
-                if (isModelUnavailableError(msg)) {
+                if (isFallbackEligibleError(msg)) {
                     continue
                 } else {
                     throw e
@@ -210,7 +219,7 @@ object GeminiVisionService {
                 } catch (e: Exception) {
                     lastError = e
                     val msg = e.message.orEmpty()
-                    if (isModelUnavailableError(msg)) {
+                    if (isFallbackEligibleError(msg)) {
                         continue
                     } else {
                         throw e

@@ -144,6 +144,22 @@ class SocietyRepository(
         return dao.insertCollections(collections)
     }
 
+    suspend fun updateCollection(collection: CollectionEntity) {
+        dao.updateCollection(collection)
+    }
+
+    suspend fun updateCollections(collections: List<CollectionEntity>) {
+        dao.updateCollections(collections)
+    }
+
+    suspend fun getExistingCollections(category: String, monthYear: String? = null): List<CollectionEntity> {
+        return if (!monthYear.isNullOrBlank() && !monthYear.equals("All Months", ignoreCase = true)) {
+            dao.getCollectionsByMonthSync(category, monthYear)
+        } else {
+            dao.getCollectionsByCategorySync(category)
+        }
+    }
+
     suspend fun deleteCollection(collection: CollectionEntity) {
         dao.deleteCollection(collection)
     }

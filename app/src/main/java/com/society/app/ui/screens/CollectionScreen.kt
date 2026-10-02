@@ -1,5 +1,6 @@
 package com.society.app.ui.screens
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -51,6 +52,14 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     val aiScanError by viewModel.aiScanError.collectAsState()
     val scannedCollections by viewModel.scannedCollections.collectAsState()
     val scanEngine by viewModel.scanEngine.collectAsState()
+    val statusMessage by viewModel.statusMessage.collectAsState()
+
+    LaunchedEffect(statusMessage) {
+        statusMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.clearStatusMessage()
+        }
+    }
 
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var showPasteDialog by remember { mutableStateOf(false) }

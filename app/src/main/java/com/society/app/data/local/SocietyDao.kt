@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.society.app.data.model.BlockSummary
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.ExpenseEntity
@@ -20,6 +21,18 @@ interface SocietyDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCollections(collections: List<CollectionEntity>): List<Long>
+
+    @Update
+    suspend fun updateCollection(collection: CollectionEntity)
+
+    @Update
+    suspend fun updateCollections(collections: List<CollectionEntity>)
+
+    @Query("SELECT * FROM collections WHERE category = :category AND monthYear = :monthYear")
+    suspend fun getCollectionsByMonthSync(category: String, monthYear: String): List<CollectionEntity>
+
+    @Query("SELECT * FROM collections WHERE category = :category")
+    suspend fun getCollectionsByCategorySync(category: String): List<CollectionEntity>
 
     @Delete
     suspend fun deleteCollection(collection: CollectionEntity)
