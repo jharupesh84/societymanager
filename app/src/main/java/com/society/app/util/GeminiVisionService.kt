@@ -49,7 +49,8 @@ object GeminiVisionService {
     suspend fun extractCollectionsFromImage(
         context: Context,
         imageUri: Uri,
-        apiKey: String
+        apiKey: String,
+        forcedBlock: String? = null
     ): Result<List<ParsedCollectionRow>> = withContext(Dispatchers.IO) {
         try {
             if (apiKey.isBlank()) {
@@ -59,19 +60,27 @@ object GeminiVisionService {
             val base64Image = uriToBase64Jpeg(context, imageUri)
                 ?: return@withContext Result.failure(Exception("Failed to decode image from device."))
 
+            val blockInstruction = if (!forcedBlock.isNullOrBlank()) {
+                "The user has specified that the block for this sheet is '$forcedBlock'. For any flat without a block letter (e.g. '101', '102', '302'), set block as '$forcedBlock' and flatNo as '$forcedBlock-101', '$forcedBlock-102', etc."
+            } else {
+                "Check the heading/title of the document (e.g. \"MAINTENANCE: 'G' BLOCK\" or \"BLOCK G\"). If a block is mentioned in the heading and flat numbers in the table are just numbers (e.g. '101', '102', '302'), use that block letter (e.g. 'G') for all those flats and format flatNo as 'G-101', 'G-102', etc."
+            }
+
             val prompt = """
                 You are an expert OCR and financial data extraction assistant for a housing society in India.
                 Examine this image, which contains a table, ledger, screenshot, or list of maintenance or festival collections from residents/flats.
                 Extract every collection row into a clean JSON array.
                 
+                $blockInstruction
+                
                 The table structure may vary. The image may have columns in any order such as:
                 (Block, Flat, Name, Amount, Mode) or (Flat, Resident, Amount, Paid Via) or (Unit, Owner, Amount), etc.
                 
                 For each row, provide a JSON object with strictly these keys:
-                - "block": string (e.g. "B", "G", "A". If block is part of the flat number like "B-504", extract "B". If no block is indicated, use "")
-                - "flatNo": string (e.g. "B-504", "G-302", "101", "A-501")
-                - "ownerName": string (e.g. "Rupesh Jha", "Kamlesh Agrawal", "Sanotsh Mishra". If absent, use "Resident")
-                - "amount": number (e.g. 2100.0, 1500.0, 1200.0. Clean up any ₹, Rs, commas)
+                - "block": string (e.g. "B", "G", "A". If block is part of the flat number like "B-504", extract "B")
+                - "flatNo": string (e.g. "B-504", "G-302", "G-101", "A-501")
+                - "ownerName": string (e.g. "Rahul Chavada", "Kamlesh Aggrawal", "Rajesh Kumar Dubey". If absent, use "Resident")
+                - "amount": number (e.g. 1200.0, 1500.0, 2100.0. Clean up any ₹, Rs, commas)
                 - "paymentMode": string (strictly either "Online" or "Cash". Convert "online", "upi", "gpay", "neft" to "Online"; convert "cash", "cheque" to "Cash". Default to "Online")
                 
                 Ignore header rows like "Block", "Flat", "Name", "Amount", "Mode".

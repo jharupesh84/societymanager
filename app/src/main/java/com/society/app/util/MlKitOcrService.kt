@@ -25,7 +25,8 @@ object MlKitOcrService {
 
     suspend fun extractCollectionsFromImage(
         context: Context,
-        imageUri: Uri
+        imageUri: Uri,
+        forcedBlock: String? = null
     ): Result<List<ParsedCollectionRow>> = withContext(Dispatchers.IO) {
         try {
             val bitmap = loadOrientedBitmap(context, imageUri)
@@ -44,11 +45,14 @@ object MlKitOcrService {
                     }
             }
 
+            // Auto-detect block from header (e.g. "MAINTENANCE: 'G' BLOCK-") or use user-specified forced block
+            val detectedBlock = forcedBlock?.ifBlank { null } ?: TextTableParser.detectHeaderBlock(visionText.text)
+
             // Strategy 1: Parse visionText.text directly
-            val rowsFromRaw = TextTableParser.parse(visionText.text)
+            val rowsFromRaw = TextTableParser.parse(visionText.text, detectedBlock)
 
             // Strategy 2: Reconstruct rows by clustering line bounding boxes by vertical Y-center
-            val rowsFromClustering = parseByRowClustering(visionText)
+            val rowsFromClustering = parseByRowClustering(visionText, detectedBlock)
 
             val finalRows = if (rowsFromClustering.size >= rowsFromRaw.size && rowsFromClustering.isNotEmpty()) {
                 rowsFromClustering
@@ -149,7 +153,7 @@ object MlKitOcrService {
     /**
      * Reconstructs table rows by grouping OCR text elements that share similar vertical Y coordinates.
      */
-    private fun parseByRowClustering(visionText: Text): List<ParsedCollectionRow> {
+    private fun parseByRowClustering(visionText: Text, defaultBlock: String? = null): List<ParsedCollectionRow> {
         val lines = visionText.textBlocks.flatMap { it.lines }
         if (lines.isEmpty()) return emptyList()
 
@@ -181,7 +185,7 @@ object MlKitOcrService {
                 .joinToString(", ") { it.text.trim() }
         }.joinToString("\n")
 
-        return TextTableParser.parse(reconstructedText)
+        return TextTableParser.parse(reconstructedText, defaultBlock)
     }
 
     private fun loadOrientedBitmap(context: Context, uri: Uri): Bitmap? {

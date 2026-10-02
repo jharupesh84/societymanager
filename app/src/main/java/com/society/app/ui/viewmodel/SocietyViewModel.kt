@@ -332,6 +332,13 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
+    private val _uploadBlockOption = MutableStateFlow("All Blocks (Auto-Detect)")
+    val uploadBlockOption: StateFlow<String> = _uploadBlockOption.asStateFlow()
+
+    fun setUploadBlockOption(option: String) {
+        _uploadBlockOption.value = option
+    }
+
     fun clearStatusMessage() {
         _statusMessage.value = null
     }
@@ -357,8 +364,20 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         _scannedCollections.value = rows
     }
 
-    fun scanCollectionImage(context: Context, imageUri: Uri, forceEngine: ScanEngine? = null) {
+    fun scanCollectionImage(
+        context: Context,
+        imageUri: Uri,
+        forceEngine: ScanEngine? = null,
+        forceBlock: String? = null
+    ) {
         val engine = forceEngine ?: _scanEngine.value
+        val blockChoice = forceBlock ?: _uploadBlockOption.value
+        val blockParam = if (blockChoice.contains("All", ignoreCase = true) || blockChoice.contains("Auto", ignoreCase = true)) {
+            null
+        } else {
+            blockChoice.removePrefix("Block").removePrefix("Wing").trim().uppercase()
+        }
+
         viewModelScope.launch {
             _isAiScanning.value = true
             _aiScanError.value = null
@@ -368,12 +387,14 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                 GeminiVisionService.extractCollectionsFromImage(
                     context = context,
                     imageUri = imageUri,
-                    apiKey = _geminiApiKey.value
+                    apiKey = _geminiApiKey.value,
+                    forcedBlock = blockParam
                 )
             } else {
                 MlKitOcrService.extractCollectionsFromImage(
                     context = context,
-                    imageUri = imageUri
+                    imageUri = imageUri,
+                    forcedBlock = blockParam
                 )
             }
 

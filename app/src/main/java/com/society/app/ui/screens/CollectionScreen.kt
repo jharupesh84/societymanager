@@ -53,6 +53,7 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     val scannedCollections by viewModel.scannedCollections.collectAsState()
     val scanEngine by viewModel.scanEngine.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
+    val uploadBlockOption by viewModel.uploadBlockOption.collectAsState()
 
     LaunchedEffect(statusMessage) {
         statusMessage?.let { msg ->
@@ -359,6 +360,65 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                         color = if (isCloud) Color(0xFF166534) else Color(0xFF0369A1),
                         lineHeight = 17.sp
                     )
+
+                    // Block Selector for Upload
+                    var blockDropdownExpanded by remember { mutableStateOf(false) }
+                    val blockOptions = listOf(
+                        "All Blocks (Auto-Detect)",
+                        "Block G",
+                        "Block A",
+                        "Block B",
+                        "Block C",
+                        "Block D",
+                        "Block E",
+                        "Block F"
+                    )
+
+                    ExposedDropdownMenuBox(
+                        expanded = blockDropdownExpanded,
+                        onExpandedChange = { blockDropdownExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = uploadBlockOption,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Block for Image", fontSize = 11.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Home,
+                                    contentDescription = null,
+                                    tint = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
+                                )
+                            },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = blockDropdownExpanded)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = blockDropdownExpanded,
+                            onDismissRequest = { blockDropdownExpanded = false }
+                        ) {
+                            blockOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = option,
+                                            fontWeight = if (option == uploadBlockOption) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        viewModel.setUploadBlockOption(option)
+                                        blockDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
 
                     // Primary Action: Upload & Scan Image
                     Button(

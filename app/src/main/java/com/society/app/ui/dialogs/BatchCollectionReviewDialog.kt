@@ -44,7 +44,7 @@ fun BatchCollectionReviewDialog(
                     block = it.block,
                     flatNo = it.flatNo,
                     ownerName = it.ownerName,
-                    amount = it.amount.toString(),
+                    amount = if (it.amount > 0) it.amount.toString() else "",
                     paymentMode = it.paymentMode
                 )
             })
@@ -52,6 +52,16 @@ fun BatchCollectionReviewDialog(
     }
 
     val totalAmount = editableRows.sumOf { it.amount.toDoubleOrNull() ?: 0.0 }
+    val paidCount = editableRows.count { (it.amount.toDoubleOrNull() ?: 0.0) > 0 }
+
+    // Detected default block
+    val detectedInitialBlock = remember {
+        initialRows.firstOrNull { it.block.isNotBlank() && it.block != "General" && it.block != "A" }?.block
+            ?: initialRows.firstOrNull { it.block.isNotBlank() && it.block != "General" }?.block
+            ?: "G"
+    }
+    var bulkBlockInput by remember { mutableStateOf(detectedInitialBlock) }
+    var showOnlyPaid by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -85,13 +95,13 @@ fun BatchCollectionReviewDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "AI Extracted Collections",
+                            text = "Batch Collection Review",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "${editableRows.size} records found • Total: ₹${"%.0f".format(totalAmount)}",
+                            text = "$paidCount paid of ${editableRows.size} flats • Total: ₹${\"%.0f\".format(totalAmount)}",
                             fontSize = 13.sp,
                             color = Color(0xFF16A34A),
                             fontWeight = FontWeight.SemiBold
@@ -128,13 +138,62 @@ fun BatchCollectionReviewDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text(
-                    text = "Review, edit, or remove any records before saving:",
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B)
-                )
+                // Bulk Block Tool and Filter Bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("Block:", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF475569))
+                        OutlinedTextField(
+                            value = bulkBlockInput,
+                            onValueChange = { bulkBlockInput = it.uppercase() },
+                            singleLine = true,
+                            modifier = Modifier.width(55.dp),
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                        Button(
+                            onClick = {
+                                val b = bulkBlockInput.trim().uppercase()
+                                if (b.isNotBlank()) {
+                                    editableRows.forEach { row ->
+                                        row.block = b
+                                        val cleanNum = row.flatNo.replace(" ", "").replace("-", "")
+                                            .removePrefix(b)
+                                        row.flatNo = "$b-$cleanNum"
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                        ) {
+                            Text("Apply All", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    FilterChip(
+                        selected = showOnlyPaid,
+                        onClick = { showOnlyPaid = !showOnlyPaid },
+                        label = { Text(if (showOnlyPaid) "Only Paid ($paidCount)" else "Show All (${editableRows.size})", fontSize = 11.sp) },
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
+
+                val displayedRows = if (showOnlyPaid) {
+                    editableRows.filter { (it.amount.toDoubleOrNull() ?: 0.0) > 0.0 }
+                } else {
+                    editableRows
+                }
 
                 // Editable List of Rows
                 LazyColumn(
@@ -143,7 +202,7 @@ fun BatchCollectionReviewDialog(
                         .fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    itemsIndexed(editableRows) { index, row ->
+                    itemsIndexed(displayedRows, key = { _, row -> row.hashCode() }) { index, row ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -167,18 +226,18 @@ fun BatchCollectionReviewDialog(
                                         modifier = Modifier.width(28.dp)
                                     )
 
-                                    // Flat input (e.g. B-504)
+                                    // Flat input (e.g. G-102)
                                     OutlinedTextField(
                                         value = row.flatNo,
                                         onValueChange = {
                                             row.flatNo = it
                                             if (it.contains("-")) {
-                                                row.block = it.substringBefore("-").trim()
+                                                row.block = it.substringBefore("-").trim().uppercase()
                                             }
                                         },
                                         label = { Text("Flat", fontSize = 11.sp) },
                                         singleLine = true,
-                                        modifier = Modifier.width(95.dp)
+                                        modifier = Modifier.width(100.dp)
                                     )
 
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -193,7 +252,7 @@ fun BatchCollectionReviewDialog(
                                     )
 
                                     IconButton(
-                                        onClick = { editableRows.removeAt(index) },
+                                        onClick = { editableRows.remove(row) },
                                         modifier = Modifier.size(32.dp)
                                     ) {
                                         Icon(
@@ -251,10 +310,11 @@ fun BatchCollectionReviewDialog(
                     item {
                         OutlinedButton(
                             onClick = {
+                                val b = bulkBlockInput.ifBlank { "G" }
                                 editableRows.add(
                                     MutableCollectionRow(
-                                        block = "General",
-                                        flatNo = "",
+                                        block = b,
+                                        flatNo = "$b-",
                                         ownerName = "",
                                         amount = "",
                                         paymentMode = "Online"
@@ -288,18 +348,26 @@ fun BatchCollectionReviewDialog(
                         Text("Cancel")
                     }
 
+                    val importCount = if (paidCount > 0) paidCount else editableRows.size
                     Button(
                         onClick = {
                             val verified = editableRows.mapNotNull { row ->
                                 val amt = row.amount.toDoubleOrNull() ?: 0.0
-                                if (row.flatNo.isNotBlank() || amt > 0) {
-                                    var blk = row.block.trim()
+                                // If some rows have payments, import the paid ones; if none has payment, allow all with flat
+                                val shouldInclude = if (paidCount > 0) amt > 0.0 else row.flatNo.isNotBlank()
+                                if (shouldInclude) {
+                                    var blk = row.block.trim().uppercase()
                                     if (blk.isBlank() && row.flatNo.contains("-")) {
-                                        blk = row.flatNo.substringBefore("-").trim()
+                                        blk = row.flatNo.substringBefore("-").trim().uppercase()
+                                    }
+                                    val cleanFlat = if (blk.isNotBlank() && !row.flatNo.startsWith(blk)) {
+                                        "$blk-${row.flatNo.removePrefix("-")}"
+                                    } else {
+                                        row.flatNo.trim()
                                     }
                                     ParsedCollectionRow(
-                                        block = if (blk.isNotBlank()) blk else "General",
-                                        flatNo = row.flatNo.trim(),
+                                        block = if (blk.isNotBlank()) blk else "G",
+                                        flatNo = cleanFlat,
                                         ownerName = row.ownerName.trim().ifBlank { "Resident" },
                                         amount = amt,
                                         paymentMode = row.paymentMode
@@ -315,7 +383,7 @@ fun BatchCollectionReviewDialog(
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
                     ) {
-                        Text("Import All (${editableRows.size} Records)", fontWeight = FontWeight.Bold)
+                        Text("Import ($importCount Records)", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -324,7 +392,7 @@ fun BatchCollectionReviewDialog(
 }
 
 class MutableCollectionRow(
-    block: String = "General",
+    block: String = "G",
     flatNo: String = "",
     ownerName: String = "",
     amount: String = "",
