@@ -60,6 +60,9 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
+    // Google ML Kit On-Device Text Recognition (100% Offline OCR)
+    implementation(libs.mlkit.text.recognition)
+
     // Room SQLite Database
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

@@ -13,6 +13,7 @@ import com.society.app.data.repository.SocietyRepository
 import com.society.app.util.CsvExporter
 import com.society.app.util.DateUtil
 import com.society.app.util.GeminiVisionService
+import com.society.app.util.MlKitOcrService
 import com.society.app.util.ParsedCollectionRow
 import com.society.app.util.ParsedExpenseRow
 import com.society.app.util.PdfExporter
@@ -268,7 +269,15 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         }
     }
 
-    // === GEMINI AI VISION & IMAGE SCANNING ===
+    // === AI VISION & OFFLINE ML KIT SCANNING ===
+    enum class ScanEngine {
+        GEMINI_CLOUD,
+        OFFLINE_MLKIT
+    }
+
+    private val _scanEngine = MutableStateFlow(ScanEngine.GEMINI_CLOUD)
+    val scanEngine: StateFlow<ScanEngine> = _scanEngine.asStateFlow()
+
     private val _geminiApiKey = MutableStateFlow(repository.getGeminiApiKey())
     val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
 
@@ -283,6 +292,10 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
 
     private val _scannedExpense = MutableStateFlow<ParsedExpenseRow?>(null)
     val scannedExpense: StateFlow<ParsedExpenseRow?> = _scannedExpense.asStateFlow()
+
+    fun setScanEngine(engine: ScanEngine) {
+        _scanEngine.value = engine
+    }
 
     fun saveGeminiApiKey(key: String) {
         val trimmed = key.trim()
@@ -301,17 +314,25 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         _scannedCollections.value = rows
     }
 
-    fun scanCollectionImage(context: Context, imageUri: Uri) {
+    fun scanCollectionImage(context: Context, imageUri: Uri, forceEngine: ScanEngine? = null) {
+        val engine = forceEngine ?: _scanEngine.value
         viewModelScope.launch {
             _isAiScanning.value = true
             _aiScanError.value = null
             _scannedCollections.value = null
 
-            val result = GeminiVisionService.extractCollectionsFromImage(
-                context = context,
-                imageUri = imageUri,
-                apiKey = _geminiApiKey.value
-            )
+            val result = if (engine == ScanEngine.GEMINI_CLOUD) {
+                GeminiVisionService.extractCollectionsFromImage(
+                    context = context,
+                    imageUri = imageUri,
+                    apiKey = _geminiApiKey.value
+                )
+            } else {
+                MlKitOcrService.extractCollectionsFromImage(
+                    context = context,
+                    imageUri = imageUri
+                )
+            }
 
             result.onSuccess { rows ->
                 _scannedCollections.value = rows
@@ -323,17 +344,25 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         }
     }
 
-    fun scanExpenseImage(context: Context, imageUri: Uri) {
+    fun scanExpenseImage(context: Context, imageUri: Uri, forceEngine: ScanEngine? = null) {
+        val engine = forceEngine ?: _scanEngine.value
         viewModelScope.launch {
             _isAiScanning.value = true
             _aiScanError.value = null
             _scannedExpense.value = null
 
-            val result = GeminiVisionService.extractExpenseFromImage(
-                context = context,
-                imageUri = imageUri,
-                apiKey = _geminiApiKey.value
-            )
+            val result = if (engine == ScanEngine.GEMINI_CLOUD) {
+                GeminiVisionService.extractExpenseFromImage(
+                    context = context,
+                    imageUri = imageUri,
+                    apiKey = _geminiApiKey.value
+                )
+            } else {
+                MlKitOcrService.extractExpenseFromImage(
+                    context = context,
+                    imageUri = imageUri
+                )
+            }
 
             result.onSuccess { expense ->
                 _scannedExpense.value = expense

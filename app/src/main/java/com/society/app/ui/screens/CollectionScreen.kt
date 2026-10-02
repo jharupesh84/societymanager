@@ -50,6 +50,7 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     val isAiScanning by viewModel.isAiScanning.collectAsState()
     val aiScanError by viewModel.aiScanError.collectAsState()
     val scannedCollections by viewModel.scannedCollections.collectAsState()
+    val scanEngine by viewModel.scanEngine.collectAsState()
 
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var showPasteDialog by remember { mutableStateOf(false) }
@@ -103,25 +104,34 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
         AlertDialog(
             onDismissRequest = { /* Prevent dismissing while running */ },
             title = {
+                val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(24.dp),
                         strokeWidth = 2.5.dp,
-                        color = Color(0xFF1565C0)
+                        color = if (isCloud) Color(0xFF1565C0) else Color(0xFF16A34A)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("AI Table Scanning", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text(
+                        text = if (isCloud) "Gemini Cloud AI Scanning" else "On-Device Offline OCR",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
                 }
             },
             text = {
+                val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "Gemini Vision is analyzing the image and reading table data...",
+                        text = if (isCloud)
+                            "Gemini Vision (3.8 Flash) is analyzing the image and reading table data..."
+                        else
+                            "Google ML Kit is reading the image directly on your device (100% offline)...",
                         fontSize = 14.sp,
                         color = Color(0xFF334155)
                     )
                     Text(
-                        "Detecting blocks, flats, resident names, amounts, and payment modes.",
+                        text = "Detecting blocks, flats, resident names, amounts, and payment modes.",
                         fontSize = 12.sp,
                         color = Color(0xFF64748B)
                     )
@@ -131,21 +141,39 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
         )
     }
 
-    // AI Scan Error Dialog
+    // Scan Error Dialog
     aiScanError?.let { errText ->
         AlertDialog(
             onDismissRequest = { viewModel.clearAiScanState() },
-            title = { Text("AI Scan Result", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)) },
+            title = { Text("Scan Result", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)) },
             text = { Text(errText, fontSize = 14.sp) },
             confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.clearAiScanState()
-                        showApiKeyDialog = true
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
-                ) {
-                    Text("Check API Key")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Quick option to retry with Offline ML Kit OCR!
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.clearAiScanState()
+                            val sampleUri = SampleImageHelper.getSampleTableImageUri(context)
+                            if (sampleUri != null) {
+                                viewModel.scanCollectionImage(
+                                    context,
+                                    sampleUri,
+                                    forceEngine = SocietyViewModel.ScanEngine.OFFLINE_MLKIT
+                                )
+                            }
+                        }
+                    ) {
+                        Text("Try Offline OCR")
+                    }
+                    Button(
+                        onClick = {
+                            viewModel.clearAiScanState()
+                            showApiKeyDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                    ) {
+                        Text("Check Key")
+                    }
                 }
             },
             dismissButton = {
@@ -226,12 +254,15 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
             }
         }
 
-        // AI Batch Import Card
+        // Batch Import Card (Supports both Gemini Cloud AI and Offline On-Device OCR)
         item {
+            val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isCloud) Color(0xFFF0FDF4) else Color(0xFFF0F9FF)
+                ),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(
@@ -247,44 +278,83 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.AutoAwesome,
+                                imageVector = if (isCloud) Icons.Default.AutoAwesome else Icons.Default.TableChart,
                                 contentDescription = null,
-                                tint = Color(0xFF16A34A),
+                                tint = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7),
                                 modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "AI Batch Import from Image",
+                                text = "Batch Import from Image / Table",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
-                                color = Color(0xFF14532D)
+                                color = if (isCloud) Color(0xFF14532D) else Color(0xFF075985)
                             )
                         }
 
-                        IconButton(
-                            onClick = { showApiKeyDialog = true },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Key,
-                                contentDescription = "AI Settings",
-                                tint = Color(0xFF16A34A),
-                                modifier = Modifier.size(18.dp)
-                            )
+                        if (isCloud) {
+                            IconButton(
+                                onClick = { showApiKeyDialog = true },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Key,
+                                    contentDescription = "AI Settings",
+                                    tint = Color(0xFF16A34A),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
 
+                    // Engine Selection FilterChips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = isCloud,
+                            onClick = { viewModel.setScanEngine(SocietyViewModel.ScanEngine.GEMINI_CLOUD) },
+                            label = {
+                                Text(
+                                    text = "✨ Gemini Cloud AI",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isCloud) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = !isCloud,
+                            onClick = { viewModel.setScanEngine(SocietyViewModel.ScanEngine.OFFLINE_MLKIT) },
+                            label = {
+                                Text(
+                                    text = "📱 Offline On-Device",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (!isCloud) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
                     Text(
-                        text = "Upload any table image, ledger sheet, or WhatsApp screenshot. AI will extract all flats, names, amounts, and payment modes automatically.",
+                        text = if (isCloud) {
+                            "Gemini 3.8 Flash Vision reads ledger tables, complex layouts, and WhatsApp screenshots automatically via Google AI."
+                        } else {
+                            "100% On-Device OCR powered by Google ML Kit. Runs completely offline on your device with no API key or internet required."
+                        },
                         fontSize = 12.sp,
-                        color = Color(0xFF166534),
+                        color = if (isCloud) Color(0xFF166534) else Color(0xFF0369A1),
                         lineHeight = 17.sp
                     )
 
-                    // 1-Tap Direct Test Button: scans the sample table image directly without needing gallery
+                    // 1-Tap Direct Test Scan Button
                     Button(
                         onClick = {
-                            if (geminiApiKey.isBlank()) {
+                            if (isCloud && geminiApiKey.isBlank()) {
                                 showApiKeyDialog = true
                             } else {
                                 val sampleUri = SampleImageHelper.getSampleTableImageUri(context)
@@ -293,27 +363,29 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                                 }
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
+                        ),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(
-                            imageVector = Icons.Default.AutoAwesome,
+                            imageVector = if (isCloud) Icons.Default.AutoAwesome else Icons.Default.TableChart,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "⚡ Scan Test Table Image (1-Tap Test)",
+                            text = if (isCloud) "⚡ Scan Test Image (Gemini AI)" else "⚡ Scan Test Image (Offline ML Kit)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
                     }
 
-                    // Choose from Gallery Button
+                    // Choose Image from Gallery
                     OutlinedButton(
                         onClick = {
-                            if (geminiApiKey.isBlank()) {
+                            if (isCloud && geminiApiKey.isBlank()) {
                                 showApiKeyDialog = true
                             } else {
                                 photoPickerLauncher.launch(
@@ -328,14 +400,14 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                             imageVector = Icons.Default.TableChart,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
-                            tint = Color(0xFF16A34A)
+                            tint = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Choose Image from Gallery / Photos",
+                            text = if (isCloud) "Choose Image from Gallery (Gemini AI)" else "Choose Image from Gallery (Offline OCR)",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp,
-                            color = Color(0xFF16A34A)
+                            color = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
                         )
                     }
 
@@ -349,14 +421,14 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                             imageVector = Icons.Default.ContentPaste,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
-                            tint = Color(0xFF0284C7)
+                            tint = Color(0xFF475569)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "📋 Paste WhatsApp / Text Table (Offline)",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp,
-                            color = Color(0xFF0284C7)
+                            color = Color(0xFF475569)
                         )
                     }
                 }
