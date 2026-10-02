@@ -267,7 +267,37 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                         lineHeight = 17.sp
                     )
 
+                    // 1-Tap Direct Test Button: scans the sample table image directly without needing gallery
                     Button(
+                        onClick = {
+                            if (geminiApiKey.isBlank()) {
+                                showApiKeyDialog = true
+                            } else {
+                                val sampleUri = SampleImageHelper.getSampleTableImageUri(context)
+                                if (sampleUri != null) {
+                                    viewModel.scanCollectionImage(context, sampleUri)
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "⚡ Scan Test Table Image (1-Tap Test)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    // Choose from Gallery Button
+                    OutlinedButton(
                         onClick = {
                             if (geminiApiKey.isBlank()) {
                                 showApiKeyDialog = true
@@ -277,42 +307,18 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                                 )
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(
                             imageVector = Icons.Default.TableChart,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Select / Scan Table Image",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            SampleImageHelper.saveSampleImageToDeviceGallery(context)
-                            photoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DownloadForOffline,
-                            contentDescription = null,
                             modifier = Modifier.size(18.dp),
                             tint = Color(0xFF16A34A)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Save Test Image to Gallery & Pick",
+                            text = "Choose Image from Gallery / Photos",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp,
                             color = Color(0xFF16A34A)

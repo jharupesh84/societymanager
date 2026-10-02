@@ -2,6 +2,8 @@ package com.society.app.util
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -14,13 +16,37 @@ import java.io.FileOutputStream
 object SampleImageHelper {
 
     /**
+     * Extracts the sample collection table image into cache and returns a content Uri.
+     * Allows 1-tap immediate testing without relying on the device photo picker.
+     */
+    fun getSampleTableImageUri(context: Context): Uri? {
+        return try {
+            val imagesDir = File(context.cacheDir, "images").apply { mkdirs() }
+            val cacheFile = File(imagesDir, "sample_collection_table.png")
+            context.assets.open("sample_collection_table.png").use { input ->
+                FileOutputStream(cacheFile).use { out ->
+                    input.copyTo(out)
+                }
+            }
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.provider",
+                cacheFile
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * Saves the bundled sample collection table image into the device's public Gallery / Pictures
-     * so it immediately appears in Google Photos / Gallery and the photo picker.
+     * and triggers the media scanner so it immediately appears in Google Photos / Gallery.
      */
     fun saveSampleImageToDeviceGallery(context: Context): Uri? {
         return try {
-            val fileName = "society_table_test_sample.png"
+            val fileName = "society_table_test_sample_${System.currentTimeMillis() % 10000}.png"
 
+            // 1. Save using MediaStore for Android 10+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
@@ -47,6 +73,7 @@ object SampleImageHelper {
                 Toast.makeText(context, "Test table image saved to your Gallery!", Toast.LENGTH_SHORT).show()
                 uri
             } else {
+                // Fallback for Android 9 and lower
                 val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
                 val targetDir = File(picturesDir, "SocietyApp").apply { mkdirs() }
                 val targetFile = File(targetDir, fileName)
@@ -55,11 +82,38 @@ object SampleImageHelper {
                         input.copyTo(out)
                     }
                 }
-                Toast.makeText(context, "Test table image saved to Pictures!", Toast.LENGTH_SHORT).show()
+
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(targetFile.absolutePath),
+                    arrayOf("image/png"),
+                    null
+                )
+
+                Toast.makeText(context, "Test table image saved to Gallery!", Toast.LENGTH_SHORT).show()
                 FileProvider.getUriForFile(context, "${context.packageName}.provider", targetFile)
             }
         } catch (e: Exception) {
-            Toast.makeText(context, "Could not save to gallery: ${e.message}", Toast.LENGTH_SHORT).show()
+            // Also try inserting via MediaStore bitmap insert
+            try {
+                val bitmap = context.assets.open("sample_collection_table.png").use {
+                    BitmapFactory.decodeStream(it)
+                }
+                if (bitmap != null) {
+                    val path = MediaStore.Images.Media.insertImage(
+                        context.contentResolver,
+                        bitmap,
+                        "society_table_sample",
+                        "Sample Table Image"
+                    )
+                    if (path != null) {
+                        Toast.makeText(context, "Test table image added to Gallery!", Toast.LENGTH_SHORT).show()
+                        return Uri.parse(path)
+                    }
+                }
+            } catch (_: Exception) {}
+
+            Toast.makeText(context, "Saved to cache. Use 1-Tap test button!", Toast.LENGTH_SHORT).show()
             null
         }
     }
