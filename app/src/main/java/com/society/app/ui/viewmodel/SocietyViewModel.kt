@@ -297,6 +297,10 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         _scannedExpense.value = null
     }
 
+    fun setScannedCollections(rows: List<ParsedCollectionRow>) {
+        _scannedCollections.value = rows
+    }
+
     fun scanCollectionImage(context: Context, imageUri: Uri) {
         viewModelScope.launch {
             _isAiScanning.value = true

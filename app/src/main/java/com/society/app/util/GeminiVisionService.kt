@@ -18,11 +18,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class ParsedCollectionRow(
-    val block: String,
-    val flatNo: String,
-    val ownerName: String,
-    val amount: Double,
-    val paymentMode: String = "Online"
+    var block: String,
+    var flatNo: String,
+    var ownerName: String,
+    var amount: Double,
+    var paymentMode: String = "Online"
 )
 
 data class ParsedExpenseRow(
@@ -33,12 +33,14 @@ data class ParsedExpenseRow(
 
 object GeminiVisionService {
 
+    // gemini-3.8-flash is the updated active model as instructed by Google Gemini API
     private val CANDIDATE_MODELS = listOf(
-        "gemini-2.0-flash",
+        "gemini-3.8-flash",
         "gemini-2.5-flash",
         "gemini-1.5-flash-latest",
-        "gemini-flash-latest",
         "gemini-1.5-flash",
+        "gemini-flash-latest",
+        "gemini-2.0-flash",
         "gemini-2.0-flash-lite"
     )
     private var cachedWorkingModel: String? = null
@@ -120,19 +122,53 @@ object GeminiVisionService {
         }
     }
 
+    private fun isModelUnavailableError(msg: String): Boolean {
+        val lower = msg.lowercase()
+        return lower.contains("not found") ||
+                lower.contains("404") ||
+                lower.contains("no longer available") ||
+                lower.contains("is no longer available") ||
+                lower.contains("deprecated") ||
+                lower.contains("unsupported") ||
+                lower.contains("not supported") ||
+                lower.contains("invalid model") ||
+                lower.contains("unknown model")
+    }
+
+    private fun extractSuggestedModel(errorMessage: String): String? {
+        val regex = Regex("use\\s+models/([a-zA-Z0-9._-]+)", RegexOption.IGNORE_CASE)
+        val match = regex.find(errorMessage)
+        return match?.groupValues?.get(1)?.trim()
+    }
+
     private fun callGeminiVisionApi(apiKey: String, prompt: String, base64Jpeg: String): String {
+        // 1. Try cached working model if available
         cachedWorkingModel?.let { model ->
             try {
                 return executeGenerateContent(apiKey, model, prompt, base64Jpeg)
             } catch (e: Exception) {
-                if (!e.message.orEmpty().contains("not found", ignoreCase = true)) {
+                val msg = e.message.orEmpty()
+                cachedWorkingModel = null
+
+                // If Google suggests a newer model in the error message, try it immediately
+                val suggested = extractSuggestedModel(msg)
+                if (suggested != null) {
+                    try {
+                        val res = executeGenerateContent(apiKey, suggested, prompt, base64Jpeg)
+                        cachedWorkingModel = suggested
+                        return res
+                    } catch (_: Exception) {}
+                }
+
+                if (!isModelUnavailableError(msg)) {
                     throw e
                 }
-                cachedWorkingModel = null
             }
         }
 
         var lastError: Exception? = null
+
+        // 2. Iterate through candidate models (starting with gemini-3.8-flash)
         for (model in CANDIDATE_MODELS) {
             try {
                 val res = executeGenerateContent(apiKey, model, prompt, base64Jpeg)
@@ -141,18 +177,96 @@ object GeminiVisionService {
             } catch (e: Exception) {
                 lastError = e
                 val msg = e.message.orEmpty()
-                if (msg.contains("not found", ignoreCase = true) || msg.contains("404")) {
+
+                // Check if Google returned an explicit suggested replacement model
+                val suggested = extractSuggestedModel(msg)
+                if (suggested != null && suggested != model) {
+                    try {
+                        val res = executeGenerateContent(apiKey, suggested, prompt, base64Jpeg)
+                        cachedWorkingModel = suggested
+                        return res
+                    } catch (e2: Exception) {
+                        lastError = e2
+                    }
+                }
+
+                if (isModelUnavailableError(msg)) {
                     continue
                 } else {
                     throw e
                 }
             }
         }
-        throw lastError ?: Exception("Unable to connect to Gemini vision API.")
+
+        // 3. Dynamic Model Discovery: query v1beta/models to list all supported models on this API key
+        try {
+            val available = fetchAvailableModels(apiKey)
+            for (model in available) {
+                if (model in CANDIDATE_MODELS) continue
+                try {
+                    val res = executeGenerateContent(apiKey, model, prompt, base64Jpeg)
+                    cachedWorkingModel = model
+                    return res
+                } catch (e: Exception) {
+                    lastError = e
+                    val msg = e.message.orEmpty()
+                    if (isModelUnavailableError(msg)) {
+                        continue
+                    } else {
+                        throw e
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        throw lastError ?: Exception("Unable to connect to Gemini vision API. Please verify your API key.")
+    }
+
+    private fun fetchAvailableModels(apiKey: String): List<String> {
+        return try {
+            val url = URL("$BASE_URL?key=$apiKey")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 10000
+            conn.readTimeout = 10000
+            if (conn.responseCode in 200..299) {
+                val text = conn.inputStream.bufferedReader().use { it.readText() }
+                val root = JSONObject(text)
+                val modelsArr = root.optJSONArray("models") ?: JSONArray()
+                val list = mutableListOf<String>()
+                for (i in 0 until modelsArr.length()) {
+                    val mObj = modelsArr.getJSONObject(i)
+                    val rawName = mObj.optString("name")
+                    val name = rawName.removePrefix("models/")
+                    val methods = mObj.optJSONArray("supportedGenerationMethods")
+                    var supportsGenContent = false
+                    if (methods != null) {
+                        for (j in 0 until methods.length()) {
+                            if (methods.getString(j) == "generateContent") {
+                                supportsGenContent = true
+                                break
+                            }
+                        }
+                    }
+                    if (supportsGenContent && name.contains("gemini", ignoreCase = true)) {
+                        list.add(name)
+                    }
+                }
+                list.sortedWith(
+                    compareByDescending<String> { it.contains("flash", ignoreCase = true) }
+                        .thenByDescending { it }
+                )
+            } else {
+                emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     private fun executeGenerateContent(apiKey: String, modelName: String, prompt: String, base64Jpeg: String): String {
-        val endpoint = "$BASE_URL/$modelName:generateContent?key=$apiKey"
+        val cleanModel = modelName.trim().removePrefix("models/")
+        val endpoint = "$BASE_URL/$cleanModel:generateContent?key=$apiKey"
         val url = URL(endpoint)
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
@@ -245,10 +359,12 @@ object GeminiVisionService {
                 var block = obj.optString("block", "").trim()
                 val ownerName = obj.optString("ownerName", "Resident").trim()
                 val amount = obj.optDouble("amount", 0.0)
-                val rawMode = obj.optString("paymentMode", "Online").trim()
-                val mode = if (rawMode.equals("Cash", ignoreCase = true)) "Cash" else "Online"
+                val mode = when (obj.optString("paymentMode", "Online").trim().lowercase()) {
+                    "cash", "cheque" -> "Cash"
+                    else -> "Online"
+                }
 
-                // Auto-infer block from flatNo if block is missing (e.g. "B-504" -> "B")
+                // If block wasn't separately provided but is in flatNo (e.g. "B-504")
                 if (block.isBlank() && flatNo.contains("-")) {
                     block = flatNo.substringBefore("-").trim()
                 }
@@ -300,7 +416,6 @@ object GeminiVisionService {
                 date = date
             )
         } catch (e: Exception) {
-            // In case it returned an array with one element
             try {
                 val array = JSONArray(cleanStr)
                 if (array.length() > 0) {

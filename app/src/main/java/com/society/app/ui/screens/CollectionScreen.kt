@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Home
@@ -34,6 +35,7 @@ import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.FundCategory
 import com.society.app.ui.dialogs.AiApiKeyDialog
 import com.society.app.ui.dialogs.BatchCollectionReviewDialog
+import com.society.app.ui.dialogs.PasteTextTableDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 import com.society.app.util.DateUtil
 import com.society.app.util.SampleImageHelper
@@ -50,6 +52,7 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     val scannedCollections by viewModel.scannedCollections.collectAsState()
 
     var showApiKeyDialog by remember { mutableStateOf(false) }
+    var showPasteDialog by remember { mutableStateOf(false) }
 
     var flatInput by remember { mutableStateOf("") }
     var ownerName by remember { mutableStateOf("") }
@@ -81,6 +84,17 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
         AiApiKeyDialog(
             viewModel = viewModel,
             onDismiss = { showApiKeyDialog = false }
+        )
+    }
+
+    // Paste Text Table Dialog (Offline Alternative)
+    if (showPasteDialog) {
+        PasteTextTableDialog(
+            onDismiss = { showPasteDialog = false },
+            onParsed = { rows ->
+                showPasteDialog = false
+                viewModel.setScannedCollections(rows)
+            }
         )
     }
 
@@ -322,6 +336,27 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp,
                             color = Color(0xFF16A34A)
+                        )
+                    }
+
+                    // Alternative: Paste WhatsApp / Text Table (Offline & Instant)
+                    OutlinedButton(
+                        onClick = { showPasteDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentPaste,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = Color(0xFF0284C7)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "📋 Paste WhatsApp / Text Table (Offline)",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = Color(0xFF0284C7)
                         )
                     }
                 }
