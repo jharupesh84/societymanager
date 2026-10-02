@@ -33,7 +33,15 @@ data class ParsedExpenseRow(
 
 object GeminiVisionService {
 
-    private const val MODEL_NAME = "gemini-1.5-flash"
+    private val CANDIDATE_MODELS = listOf(
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-2.0-flash-lite"
+    )
+    private var cachedWorkingModel: String? = null
     private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     suspend fun extractCollectionsFromImage(
@@ -113,7 +121,38 @@ object GeminiVisionService {
     }
 
     private fun callGeminiVisionApi(apiKey: String, prompt: String, base64Jpeg: String): String {
-        val endpoint = "$BASE_URL/$MODEL_NAME:generateContent?key=$apiKey"
+        cachedWorkingModel?.let { model ->
+            try {
+                return executeGenerateContent(apiKey, model, prompt, base64Jpeg)
+            } catch (e: Exception) {
+                if (!e.message.orEmpty().contains("not found", ignoreCase = true)) {
+                    throw e
+                }
+                cachedWorkingModel = null
+            }
+        }
+
+        var lastError: Exception? = null
+        for (model in CANDIDATE_MODELS) {
+            try {
+                val res = executeGenerateContent(apiKey, model, prompt, base64Jpeg)
+                cachedWorkingModel = model
+                return res
+            } catch (e: Exception) {
+                lastError = e
+                val msg = e.message.orEmpty()
+                if (msg.contains("not found", ignoreCase = true) || msg.contains("404")) {
+                    continue
+                } else {
+                    throw e
+                }
+            }
+        }
+        throw lastError ?: Exception("Unable to connect to Gemini vision API.")
+    }
+
+    private fun executeGenerateContent(apiKey: String, modelName: String, prompt: String, base64Jpeg: String): String {
+        val endpoint = "$BASE_URL/$modelName:generateContent?key=$apiKey"
         val url = URL(endpoint)
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MonetizationOn
@@ -35,6 +36,7 @@ import com.society.app.ui.dialogs.AiApiKeyDialog
 import com.society.app.ui.dialogs.BatchCollectionReviewDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 import com.society.app.util.DateUtil
+import com.society.app.util.SampleImageHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -289,6 +291,31 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                             text = "Select / Scan Table Image",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            SampleImageHelper.saveSampleImageToDeviceGallery(context)
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DownloadForOffline,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = Color(0xFF16A34A)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Save Test Image to Gallery & Pick",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = Color(0xFF16A34A)
                         )
                     }
                 }
