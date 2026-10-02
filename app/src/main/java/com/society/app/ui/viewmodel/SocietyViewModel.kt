@@ -456,11 +456,15 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                 val existing = existingMap[key]
 
                 if (existing != null) {
-                    if (kotlin.math.abs(existing.amount - item.amount) < 0.01) {
-                        // Same amount -> Ignore duplicate
+                    val isSameAmount = kotlin.math.abs(existing.amount - item.amount) < 0.01
+                    val isSameMode = existing.paymentMode.equals(item.paymentMode, ignoreCase = true)
+                    val isSameName = existing.ownerName.equals(item.ownerName, ignoreCase = true)
+
+                    if (isSameAmount && isSameMode && isSameName) {
+                        // Same record -> Ignore duplicate
                         ignoredCount++
                     } else {
-                        // Different amount -> Update existing record
+                        // Amount, Payment Mode, or Name changed -> Update existing record
                         toUpdate.add(
                             existing.copy(
                                 amount = item.amount,

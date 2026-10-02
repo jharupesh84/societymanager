@@ -47,7 +47,7 @@ object MlKitOcrService {
             // Automatic header block detection (e.g. "MAINTENANCE: 'G' BLOCK - 20" -> "G")
             val detectedHeaderBlock = TextTableParser.detectHeaderBlock(visionText.text)
 
-            // Strategy 1: Reconstruct rows by clustering line bounding boxes by vertical Y-center & overlap
+            // Strategy 1: Reconstruct rows by clustering line bounding boxes by vertical Y-center
             val rowsFromClustering = parseByRowClustering(visionText, detectedHeaderBlock)
 
             // Strategy 2: Parse visionText.text directly
@@ -58,8 +58,10 @@ object MlKitOcrService {
 
             val finalRows = if (validClustered.isNotEmpty()) {
                 validClustered
-            } else {
+            } else if (validRaw.isNotEmpty()) {
                 validRaw
+            } else {
+                (rowsFromClustering.ifEmpty { rowsFromRaw }).filter { it.flatNo.any { c -> c.isDigit() } }
             }
 
             if (finalRows.isEmpty()) {
@@ -153,7 +155,7 @@ object MlKitOcrService {
     }
 
     /**
-     * Reconstructs table rows by grouping OCR text elements that share similar vertical Y coordinates and overlap.
+     * Reconstructs table rows by grouping OCR text elements that share similar vertical Y coordinates.
      */
     private fun parseByRowClustering(visionText: Text, defaultBlock: String? = null): List<ParsedCollectionRow> {
         val lines = visionText.textBlocks.flatMap { it.lines }.filter { it.text.isNotBlank() }
@@ -161,26 +163,18 @@ object MlKitOcrService {
 
         class ClusterRow(first: Text.Line) {
             val items = mutableListOf(first)
-            var top = first.boundingBox?.top ?: 0
-            var bottom = first.boundingBox?.bottom ?: 0
-            val centerY: Int get() = (top + bottom) / 2
-            val height: Int get() = kotlin.math.max(1, bottom - top)
+            // Use the anchor centerY of the row's first element
+            val anchorY = first.boundingBox?.centerY() ?: 0
+            val anchorH = kotlin.math.max(12, first.boundingBox?.height() ?: 24)
 
             fun matches(line: Text.Line): Boolean {
                 val box = line.boundingBox ?: return false
-                val overlap = kotlin.math.min(bottom, box.bottom) - kotlin.math.max(top, box.top)
-                val minH = kotlin.math.min(height, box.height())
-                if (overlap > 0 && overlap >= minH * 0.35) return true
-
-                val dist = kotlin.math.abs(centerY - box.centerY())
-                return dist <= kotlin.math.max(height, box.height()) * 0.8
+                val diff = kotlin.math.abs(anchorY - box.centerY())
+                return diff <= anchorH * 0.65
             }
 
             fun add(line: Text.Line) {
                 items.add(line)
-                val box = line.boundingBox ?: return
-                top = kotlin.math.min(top, box.top)
-                bottom = kotlin.math.max(bottom, box.bottom)
             }
         }
 
@@ -199,7 +193,7 @@ object MlKitOcrService {
 
         // For each clustered row, sort items left-to-right (X position)
         val reconstructedText = clusterRows
-            .sortedBy { it.top }
+            .sortedBy { it.anchorY }
             .map { row ->
                 row.items.sortedBy { it.boundingBox?.left ?: 0 }
                     .joinToString(", ") { it.text.trim() }

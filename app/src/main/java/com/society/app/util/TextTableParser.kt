@@ -25,16 +25,7 @@ object TextTableParser {
             return null
         }
 
-        // 2. Also check if multiple single-letter block tokens appear repeatedly (e.g. B, G, C, A, F, E)
-        val standaloneBlocks = Regex("""\b([A-G])\b""").findAll(fullText)
-            .map { it.groupValues[1].uppercase() }
-            .distinct()
-            .toList()
-        if (standaloneBlocks.size >= 3) {
-            return null
-        }
-
-        val headerSection = fullText.lines().take(8).joinToString("\n")
+        val headerSection = fullText.lines().take(10).joinToString("\n")
 
         // Pattern 1: 'G' BLOCK, "G" BLOCK, or MAINTENANCE: 'G' BLOCK, MAINTENANCE: 'G' BLOCK - 20
         val regex1 = Regex("""(?:MAINTENANCE|COLLECTION)?[:\s]*['"‘“]([A-Za-z0-9])['"’”]\s*[-/_]?\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
@@ -53,7 +44,7 @@ object TextTableParser {
         }
 
         // Pattern 3: Explicit MAINTENANCE / COLLECTION title with BLOCK / WING
-        val regex3 = Regex("""(?:MAINTENANCE|COLLECTION)\s*[:\-_]?\s*(?:BLOCK|WING)\s*[:\-_]?\s*([A-Za-z0-9])\b""", RegexOption.IGNORE_CASE)
+        val regex3 = Regex("""(?:MAINTENANCE|COLLECTION)\s*[:\-_]?\s*(?:BLOCK|WING)?\s*[:\-_]?\s*['"‘“]?([A-Za-z0-9])['"’”]?\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
         val match3 = regex3.find(headerSection)
         if (match3 != null) {
             val b = match3.groupValues[1].uppercase()
@@ -104,8 +95,6 @@ object TextTableParser {
             lower.contains("period from") || lower.contains("bal due") ||
             lower.contains("late fee") || lower.contains("rupees only") ||
             lower.contains("total (rupees") || lower.contains("navratri ke") ||
-            lower.contains("cash/ on line") || lower.contains("cash/on line") ||
-            lower.contains("cash / online") || lower.contains("cash/online") ||
             lower.contains("signature") || lower.contains("sign")
         ) {
             return true
@@ -143,21 +132,44 @@ object TextTableParser {
         var amountVal = 0.0
         var paymentMode = "Online"
 
-        val remainingTokens = mutableListOf<String>()
-
+        // 1. First pass: detect payment mode anywhere in tokens (e.g. "cash", "CASH", "1200 cash", "1500 ONE LINE")
         for (token in tokens) {
             val lower = token.lowercase()
-
-            // 1. Payment mode check
-            if (lower in listOf("cash", "cheque", "check")) {
+            if (lower.contains("cash") || lower.contains("cheque") || lower.contains("check")) {
                 paymentMode = "Cash"
-                continue
-            } else if (lower in listOf("online", "upi", "gpay", "neft", "rtgs", "bank", "phonepe", "paytm", "one line", "on line")) {
+                break
+            } else if (lower.contains("online") || lower.contains("one line") || lower.contains("on line") ||
+                lower.contains("upi") || lower.contains("gpay") || lower.contains("neft") || lower.contains("rtgs") ||
+                lower.contains("bank") || lower.contains("phonepe") || lower.contains("paytm")
+            ) {
                 paymentMode = "Online"
+            }
+        }
+
+        // 2. Pre-clean tokens: strip payment mode keywords from tokens so that "1200 cash" -> "1200", "1500 ONE LINE" -> "1500"
+        val modeWordRegex = Regex("""(?i)\b(?:cash|cheque|check|one\s*line|on\s*line|online|upi|gpay|neft|rtgs|bank|phonepe|paytm)\b""")
+        val remainingTokens = mutableListOf<String>()
+
+        for (rawToken in tokens) {
+            val token = rawToken.replace(modeWordRegex, "").trim()
+            if (token.isBlank()) continue
+
+            // Skip standalone 1-2 digit serial numbers (e.g. 1, 2, ..., 20)
+            if (token.matches(Regex("^[0-9]{1,2}$"))) {
                 continue
             }
 
-            // 2. Amount check (e.g. 2100, 1500, ₹2100, 12.00 in OCR notation)
+            // Skip date tokens (e.g. 01/10/26, 27/9/26, 28/9/26)
+            if (token.matches(Regex("^[0-9]{1,2}[-/][0-9]{1,2}(?:[-/][0-9]{2,4})?$"))) {
+                continue
+            }
+
+            // Skip dash-only tokens (e.g. "-", "--")
+            if (token == "-" || token == "--") {
+                continue
+            }
+
+            // Amount check (e.g. 2100, 1500, ₹2100, 12.00, 1200 in OCR notation)
             val cleanAmt = token.replace("₹", "").replace("Rs", "", ignoreCase = true)
                 .replace(".", "").replace(",", "").trim()
             val parsedAmt = token.replace("₹", "").replace("Rs", "", ignoreCase = true)
@@ -175,7 +187,7 @@ object TextTableParser {
                 continue
             }
 
-            // 3. Flat check (e.g. B-504, G-302, 101, 102, 504)
+            // Flat check (e.g. B-504, G-302, 101, 102, 504)
             val flatMatch = Regex("^([A-Za-z])?[-/\\s]?([0-9]{3,4})$").find(token)
             if (flatMatch != null && flatStr.isBlank()) {
                 val blockPart = flatMatch.groupValues[1].uppercase()
@@ -185,23 +197,13 @@ object TextTableParser {
                 continue
             }
 
-            // 4. Standalone Block column (e.g. "A", "B", "G", "Block G", "Wing A")
+            // Standalone Block column (e.g. "A", "B", "G", "Block G", "Wing A")
             val blockOnlyMatch = Regex("^(?:Block|Wing)?\\s*([A-Za-z])$", RegexOption.IGNORE_CASE).find(token)
-            if (blockOnlyMatch != null) {
+            if (blockOnlyMatch != null && blockOnlyMatch.groupValues[1].length == 1) {
                 if (blockStr.isBlank()) {
                     blockStr = blockOnlyMatch.groupValues[1].uppercase()
                 }
                 continue // Consume block token without putting it in name
-            }
-
-            // 5. Skip date tokens (e.g. 01/10/26, 27/9/26, 28/9/26)
-            if (token.matches(Regex("^[0-9]{1,2}[-/][0-9]{1,2}(?:[-/][0-9]{2,4})?$"))) {
-                continue
-            }
-
-            // 6. Skip standalone serial numbers (e.g. 1, 2, 3, ..., 20)
-            if (token.matches(Regex("^[0-9]{1,2}$")) && flatStr.isNotBlank()) {
-                continue
             }
 
             remainingTokens.add(token)
@@ -223,7 +225,7 @@ object TextTableParser {
             }
         }
 
-        // If Amount was not found, check remaining tokens
+        // If Amount was not found, check remaining tokens for a number
         if (amountVal == 0.0) {
             for (i in remainingTokens.indices) {
                 val t = remainingTokens[i]
