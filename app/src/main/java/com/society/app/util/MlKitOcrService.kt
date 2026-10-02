@@ -25,8 +25,7 @@ object MlKitOcrService {
 
     suspend fun extractCollectionsFromImage(
         context: Context,
-        imageUri: Uri,
-        forcedBlock: String? = null
+        imageUri: Uri
     ): Result<List<ParsedCollectionRow>> = withContext(Dispatchers.IO) {
         try {
             val bitmap = loadOrientedBitmap(context, imageUri)
@@ -45,13 +44,14 @@ object MlKitOcrService {
                     }
             }
 
-            val targetBlock = forcedBlock?.trim()?.uppercase()?.ifBlank { "G" } ?: "G"
+            // Automatic header block detection (e.g. "MAINTENANCE: 'G' BLOCK - 20" -> "G")
+            val detectedHeaderBlock = TextTableParser.detectHeaderBlock(visionText.text)
 
             // Strategy 1: Parse visionText.text directly
-            val rowsFromRaw = TextTableParser.parse(visionText.text, targetBlock)
+            val rowsFromRaw = TextTableParser.parse(visionText.text, detectedHeaderBlock)
 
             // Strategy 2: Reconstruct rows by clustering line bounding boxes by vertical Y-center
-            val rowsFromClustering = parseByRowClustering(visionText, targetBlock)
+            val rowsFromClustering = parseByRowClustering(visionText, detectedHeaderBlock)
 
             val finalRows = if (rowsFromClustering.size >= rowsFromRaw.size && rowsFromClustering.isNotEmpty()) {
                 rowsFromClustering

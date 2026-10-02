@@ -7,11 +7,54 @@ package com.society.app.util
 object TextTableParser {
 
     /**
-     * Parses raw pasted text or OCR text into collection rows using the user-selected block.
-     * Every flat (e.g. "101", "102", "302") is assigned the selected block and formatted as e.g. "G-101", "G-102".
+     * Inspects the document header (first 15 lines) to detect if the entire sheet belongs to a specific block.
+     * Examples:
+     * - "MAINTENANCE: 'G' BLOCK - 20" -> "G"
+     * - "MAINTENANCE : 'G' BLOCK" -> "G"
+     * - "'G' BLOCK" -> "G"
+     * - "BLOCK: B" or "BLOCK - B" -> "B"
+     * - "BLOCK G" or "WING A" -> "G" or "A"
      */
-    fun parse(rawText: String, targetBlock: String? = null): List<ParsedCollectionRow> {
-        val cleanTargetBlock = targetBlock?.trim()?.uppercase()?.ifBlank { null }
+    fun detectHeaderBlock(fullText: String): String? {
+        val headerSection = fullText.lines().take(15).joinToString("\n")
+
+        // Pattern 1: 'G' BLOCK, "G" BLOCK, or MAINTENANCE: 'G' BLOCK, MAINTENANCE: 'G' BLOCK - 20
+        val regex1 = Regex("""(?:MAINTENANCE|COLLECTION)?[:\s]*['"‘“]?([A-Za-z0-9])['"’”]?\s*[-/_]?\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
+        val match1 = regex1.find(headerSection)
+        if (match1 != null) {
+            val b = match1.groupValues[1].uppercase()
+            if (b.isNotBlank()) return b
+        }
+
+        // Pattern 2: BLOCK: G, BLOCK - G, BLOCK 'G', BLOCK "G", BLOCK G, WING: A
+        val regex2 = Regex("""(?:BLOCK|WING)\s*[:\-_]?\s*['"‘“]?([A-Za-z0-9])['"’”]?\b""", RegexOption.IGNORE_CASE)
+        val match2 = regex2.find(headerSection)
+        if (match2 != null) {
+            val b = match2.groupValues[1].uppercase()
+            if (b.isNotBlank()) return b
+        }
+
+        // Pattern 3: Standalone quoted letter followed by BLOCK anywhere in header
+        val regex3 = Regex("""['"‘“]([A-Za-z0-9])['"’”]\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
+        val match3 = regex3.find(headerSection)
+        if (match3 != null) {
+            val b = match3.groupValues[1].uppercase()
+            if (b.isNotBlank()) return b
+        }
+
+        return null
+    }
+
+    /**
+     * Parses raw pasted text or OCR text into collection rows.
+     * - For multi-block tables: extracts the explicit block for each row individually (e.g. A-101, B-202).
+     * - For single-block sheets: if a header block (e.g. "G" from "MAINTENANCE: 'G' BLOCK") is found,
+     *   flats without a block prefix (e.g. "101", "102", "302", "503") are assigned that block and formatted as "G-101", "G-102", etc.
+     */
+    fun parse(rawText: String, overrideHeaderBlock: String? = null): List<ParsedCollectionRow> {
+        val detectedHeaderBlock = overrideHeaderBlock?.trim()?.uppercase()?.ifBlank { null }
+            ?: detectHeaderBlock(rawText)
+
         val lines = rawText.lines()
         val result = mutableListOf<ParsedCollectionRow>()
 
@@ -22,7 +65,7 @@ object TextTableParser {
             // Skip title/header/footer rows
             if (isHeaderOrTitleLine(trimmed)) continue
 
-            val row = parseLine(trimmed, cleanTargetBlock)
+            val row = parseLine(trimmed, detectedHeaderBlock)
             if (row != null) {
                 result.add(row)
             }
@@ -43,7 +86,9 @@ object TextTableParser {
             lower.contains("period from") || lower.contains("bal due") ||
             lower.contains("late fee") || lower.contains("rupees only") ||
             lower.contains("total (rupees") || lower.contains("navratri ke") ||
-            lower.contains("cash/ on line") || lower.contains("cash/on line")
+            lower.contains("cash/ on line") || lower.contains("cash/on line") ||
+            lower.contains("cash / online") || lower.contains("cash/online") ||
+            lower.contains("signature") || lower.contains("sign")
         ) {
             return true
         }
@@ -199,21 +244,25 @@ object TextTableParser {
             nameStr = "Resident"
         }
 
-        // Determine effective block: explicit target block takes priority
+        // Determine effective block:
+        // 1. Explicit row block takes top precedence (for multi-block sheets).
+        // 2. Otherwise, if document header specifies a block (e.g. "G" from "MAINTENANCE: 'G' BLOCK"), use it.
+        // 3. Otherwise, if flatStr already has a block prefix (e.g. "B-504"), use it.
+        // 4. Default to "General".
         val effectiveBlock = when {
-            !defaultBlock.isNullOrBlank() -> defaultBlock.uppercase()
             blockStr.isNotBlank() && blockStr != "General" -> blockStr
+            !defaultBlock.isNullOrBlank() -> defaultBlock.uppercase()
             flatStr.contains("-") -> flatStr.substringBefore("-").trim().uppercase()
-            else -> "A"
+            else -> "General"
         }
 
-        // Standardize flat number with the block (e.g. G-101, G-102, G-302)
+        // Standardize flat number with the block (e.g. G-101, G-102, G-302, B-504)
         val cleanFlat = when {
-            flatStr.startsWith("$effectiveBlock-", ignoreCase = true) -> flatStr
-            flatStr.startsWith(effectiveBlock, ignoreCase = true) && flatStr.length > effectiveBlock.length -> {
+            effectiveBlock != "General" && flatStr.startsWith("$effectiveBlock-", ignoreCase = true) -> flatStr
+            effectiveBlock != "General" && flatStr.startsWith(effectiveBlock, ignoreCase = true) && flatStr.length > effectiveBlock.length -> {
                 "$effectiveBlock-${flatStr.removePrefix(effectiveBlock).removePrefix("-")}"
             }
-            effectiveBlock.isNotBlank() && effectiveBlock != "General" && !flatStr.contains("-") -> {
+            effectiveBlock != "General" && !flatStr.contains("-") && flatStr.all { it.isDigit() } -> {
                 "$effectiveBlock-$flatStr"
             }
             else -> flatStr
@@ -222,7 +271,7 @@ object TextTableParser {
         if (cleanFlat.isNotBlank() || amountVal > 0.0) {
             return ParsedCollectionRow(
                 block = effectiveBlock,
-                flatNo = cleanFlat.ifBlank { "$effectiveBlock-101" },
+                flatNo = cleanFlat.ifBlank { if (effectiveBlock != "General") "$effectiveBlock-101" else "101" },
                 ownerName = nameStr,
                 amount = amountVal,
                 paymentMode = paymentMode

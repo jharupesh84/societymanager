@@ -332,13 +332,6 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
-    private val _uploadBlockOption = MutableStateFlow("Block G")
-    val uploadBlockOption: StateFlow<String> = _uploadBlockOption.asStateFlow()
-
-    fun setUploadBlockOption(option: String) {
-        _uploadBlockOption.value = option
-    }
-
     fun clearStatusMessage() {
         _statusMessage.value = null
     }
@@ -367,12 +360,9 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     fun scanCollectionImage(
         context: Context,
         imageUri: Uri,
-        forceEngine: ScanEngine? = null,
-        forceBlock: String? = null
+        forceEngine: ScanEngine? = null
     ) {
         val engine = forceEngine ?: _scanEngine.value
-        val blockChoice = forceBlock ?: _uploadBlockOption.value
-        val blockParam = blockChoice.removePrefix("Block").removePrefix("Wing").trim().uppercase().ifBlank { "G" }
 
         viewModelScope.launch {
             _isAiScanning.value = true
@@ -383,14 +373,12 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                 GeminiVisionService.extractCollectionsFromImage(
                     context = context,
                     imageUri = imageUri,
-                    apiKey = _geminiApiKey.value,
-                    forcedBlock = blockParam
+                    apiKey = _geminiApiKey.value
                 )
             } else {
                 MlKitOcrService.extractCollectionsFromImage(
                     context = context,
-                    imageUri = imageUri,
-                    forcedBlock = blockParam
+                    imageUri = imageUri
                 )
             }
 

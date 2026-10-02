@@ -49,8 +49,7 @@ object GeminiVisionService {
     suspend fun extractCollectionsFromImage(
         context: Context,
         imageUri: Uri,
-        apiKey: String,
-        forcedBlock: String? = null
+        apiKey: String
     ): Result<List<ParsedCollectionRow>> = withContext(Dispatchers.IO) {
         try {
             if (apiKey.isBlank()) {
@@ -60,32 +59,31 @@ object GeminiVisionService {
             val base64Image = uriToBase64Jpeg(context, imageUri)
                 ?: return@withContext Result.failure(Exception("Failed to decode image from device."))
 
-            val targetBlock = forcedBlock?.trim()?.uppercase()?.ifBlank { "G" } ?: "G"
-            val blockInstruction = """
-                This entire sheet belongs to Block '$targetBlock'.
-                For every row, set "block" to "$targetBlock".
-                Every flat number must be formatted with this block prefix, e.g. "$targetBlock-101", "$targetBlock-102", "$targetBlock-302", etc.
-            """.trimIndent()
-
             val prompt = """
                 You are an expert OCR and financial data extraction assistant for a housing society in India.
                 Examine this image, which contains a table, ledger, screenshot, or list of maintenance or festival collections from residents/flats.
                 Extract every collection row into a clean JSON array.
                 
-                $blockInstruction
+                Block & Flat Number Rules:
+                1. Inspect the document header/title at the top (e.g. "MAINTENANCE: 'G' BLOCK", "'G' BLOCK", "BLOCK G", "WING A").
+                   If a single block is specified in the header/title and table rows only list numeric flat numbers (e.g. 101, 102, 302, 503),
+                   assign that header block (e.g. "G") to all those flats and format flatNo as "G-101", "G-102", "G-302", "G-503", etc.
+                2. If the sheet contains flats from multiple blocks (e.g. A-101, B-202, C-303, G-102) or has a dedicated Block column with varying letters,
+                   extract the specific block and flat number for each row individually.
+                3. Ignore serial numbers (1, 2, ..., 20), column headers, and society address/title lines (e.g. Arya Krishna Enclave, Saijpur Bogha).
                 
                 The table structure may vary. The image may have columns in any order such as:
                 (Block, Flat, Name, Amount, Mode) or (Flat, Resident, Amount, Paid Via) or (Unit, Owner, Amount), etc.
                 
                 For each row, provide a JSON object with strictly these keys:
-                - "block": string (e.g. "B", "G", "A". If block is part of the flat number like "B-504", extract "B")
-                - "flatNo": string (e.g. "B-504", "G-302", "G-101", "A-501")
+                - "block": string (e.g. "G", "B", "A". If block is part of the flat number like "G-302", extract "G")
+                - "flatNo": string (e.g. "G-102", "G-302", "B-504", "A-501")
                 - "ownerName": string (e.g. "Rahul Chavada", "Kamlesh Aggrawal", "Rajesh Kumar Dubey". If absent, use "Resident")
-                - "amount": number (e.g. 1200.0, 1500.0, 2100.0. Clean up any ₹, Rs, commas)
+                - "amount": number (e.g. 1200.0, 1500.0, 2100.0. Clean up any ₹, Rs, commas. If blank/unpaid, use 0.0)
                 - "paymentMode": string (strictly either "Online" or "Cash". Convert "online", "upi", "gpay", "neft" to "Online"; convert "cash", "cheque" to "Cash". Default to "Online")
                 
                 Ignore header rows like "Block", "Flat", "Name", "Amount", "Mode".
-                Return ONLY the valid JSON array.
+                Return ONLY the valid raw JSON array of objects without markdown fences, explanation, or comments.
             """.trimIndent()
 
             val rawJson = callGeminiVisionApi(apiKey, prompt, base64Image)
