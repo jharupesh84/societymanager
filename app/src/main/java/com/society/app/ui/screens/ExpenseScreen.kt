@@ -1,16 +1,22 @@
 package com.society.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.society.app.data.model.ExpenseEntity
 import com.society.app.data.model.FundCategory
+import com.society.app.ui.dialogs.AiApiKeyDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 import com.society.app.util.DateUtil
 
@@ -34,15 +41,107 @@ fun ExpenseScreen(viewModel: SocietyViewModel) {
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val expenses by viewModel.expenses.collectAsState()
     val totalExpense by viewModel.totalExpense.collectAsState()
+    val geminiApiKey by viewModel.geminiApiKey.collectAsState()
+    val isAiScanning by viewModel.isAiScanning.collectAsState()
+    val aiScanError by viewModel.aiScanError.collectAsState()
+    val scannedExpense by viewModel.scannedExpense.collectAsState()
+
+    var showApiKeyDialog by remember { mutableStateOf(false) }
 
     var detail by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
     var expenseMonth by remember { mutableStateOf(DateUtil.getCurrentMonthYear()) }
     var monthDropdownExpanded by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var aiSuccessMessage by remember { mutableStateOf<String?>(null) }
 
     val monthOptions = remember { DateUtil.getMonthYearList() }
     val isMonthlyMaintenance = selectedCategory == FundCategory.CATEGORY_MAINTENANCE
+
+    // Photo picker launcher for AI bill/receipt scanning
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.scanExpenseImage(context, uri)
+        }
+    }
+
+    // Effect: Auto-populate inputs when AI finishes scanning an expense
+    LaunchedEffect(scannedExpense) {
+        scannedExpense?.let { parsed ->
+            detail = parsed.detail
+            amountText = if (parsed.amount > 0) parsed.amount.toString() else ""
+            aiSuccessMessage = "Extracted from bill: ${parsed.detail} (₹${parsed.amount})"
+            viewModel.clearAiScanState()
+        }
+    }
+
+    // API Key Dialog
+    if (showApiKeyDialog) {
+        AiApiKeyDialog(
+            viewModel = viewModel,
+            onDismiss = { showApiKeyDialog = false }
+        )
+    }
+
+    // AI Scanning Progress Dialog
+    if (isAiScanning) {
+        AlertDialog(
+            onDismissRequest = { /* Prevent dismissing while running */ },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.5.dp,
+                        color = Color(0xFFDC2626)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("AI Bill Scanning", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Gemini Vision is analyzing the bill / receipt image...",
+                        fontSize = 14.sp,
+                        color = Color(0xFF334155)
+                    )
+                    Text(
+                        "Detecting vendor name, total amount, and bill details.",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // AI Scan Error Dialog
+    aiScanError?.let { errText ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearAiScanState() },
+            title = { Text("AI Scan Result", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)) },
+            text = { Text(errText, fontSize = 14.sp) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.clearAiScanState()
+                        showApiKeyDialog = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("Check API Key")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.clearAiScanState() }) {
+                    Text("Dismiss")
+                }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -157,6 +256,91 @@ fun ExpenseScreen(viewModel: SocietyViewModel) {
             }
         }
 
+        // AI Scan Bill Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF1F2)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFFE11D48),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "AI Scan Bill / Receipt",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Color(0xFF9F1239)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { showApiKeyDialog = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = "AI Settings",
+                                tint = Color(0xFFE11D48),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Upload vendor invoice, contractor bill, or receipt slip. AI will auto-read the amount, vendor name, and date into the form.",
+                        fontSize = 12.sp,
+                        color = Color(0xFFBE123C),
+                        lineHeight = 17.sp
+                    )
+
+                    Button(
+                        onClick = {
+                            if (geminiApiKey.isBlank()) {
+                                showApiKeyDialog = true
+                            } else {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ReceiptLong,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Select / Scan Bill Image",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+
         // Add Expense Form
         item {
             Card(
@@ -172,6 +356,24 @@ fun ExpenseScreen(viewModel: SocietyViewModel) {
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFDC2626)
                     )
+
+                    aiSuccessMessage?.let { msg ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFDCFCE7),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = msg,
+                                fontSize = 12.sp,
+                                color = Color(0xFF15803D),
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // Month Selector for Monthly Maintenance
@@ -227,10 +429,8 @@ fun ExpenseScreen(viewModel: SocietyViewModel) {
                     OutlinedTextField(
                         value = detail,
                         onValueChange = { detail = it },
-                        label = { Text("Expense Detail / Purpose") },
-                        placeholder = {
-                            Text(if (isMonthlyMaintenance) "e.g. Lift AMC, Security, Sweeper, Electricity" else "e.g. DJ Sound, Flowers, Prasad, Decoration")
-                        },
+                        label = { Text("Expense Details / Vendor Name") },
+                        placeholder = { Text("e.g. Electrician, Lift AMC, Generator Diesel") },
                         leadingIcon = {
                             Icon(imageVector = Icons.Default.Description, contentDescription = null, tint = Color(0xFFDC2626))
                         },
@@ -240,7 +440,7 @@ fun ExpenseScreen(viewModel: SocietyViewModel) {
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     OutlinedTextField(
                         value = amountText,
@@ -266,17 +466,19 @@ fun ExpenseScreen(viewModel: SocietyViewModel) {
                         onClick = {
                             val amt = amountText.toDoubleOrNull()
                             if (detail.isBlank()) {
-                                errorMessage = "Please enter expense details"
+                                errorMessage = "Please enter expense detail"
                             } else if (amt == null || amt <= 0.0) {
                                 errorMessage = "Enter a valid positive amount"
                             } else {
                                 errorMessage = null
+                                aiSuccessMessage = null
                                 viewModel.addExpense(
                                     detail = detail,
                                     amount = amt,
                                     category = selectedCategory,
                                     monthYear = if (isMonthlyMaintenance) expenseMonth else DateUtil.getCurrentMonthYear()
                                 )
+                                // Clear inputs after addition
                                 detail = ""
                                 amountText = ""
                             }
@@ -295,7 +497,7 @@ fun ExpenseScreen(viewModel: SocietyViewModel) {
 
         item {
             Text(
-                text = "$selectedCategory Expense History (${expenses.size})",
+                text = "Recorded Expenses (${expenses.size})",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF1E293B)

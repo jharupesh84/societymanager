@@ -18,6 +18,9 @@ interface SocietyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCollection(collection: CollectionEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCollections(collections: List<CollectionEntity>): List<Long>
+
     @Delete
     suspend fun deleteCollection(collection: CollectionEntity)
 

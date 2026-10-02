@@ -19,6 +19,12 @@ class SocietyRepository(
         context?.getSharedPreferences("society_categories_prefs", Context.MODE_PRIVATE)
     }
 
+    // === GEMINI AI API KEY ===
+    fun getGeminiApiKey(): String = prefs?.getString("gemini_api_key", "") ?: ""
+    fun saveGeminiApiKey(key: String) {
+        prefs?.edit()?.putString("gemini_api_key", key.trim())?.apply()
+    }
+
     // === PERSISTENCE FOR CUSTOM CATEGORIES ===
 
     fun loadCustomCategories(): List<FundCategory> {
@@ -132,6 +138,10 @@ class SocietyRepository(
 
     suspend fun addCollection(collection: CollectionEntity): Long {
         return dao.insertCollection(collection)
+    }
+
+    suspend fun addCollections(collections: List<CollectionEntity>): List<Long> {
+        return dao.insertCollections(collections)
     }
 
     suspend fun deleteCollection(collection: CollectionEntity) {

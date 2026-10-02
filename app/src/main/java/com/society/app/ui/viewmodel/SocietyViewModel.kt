@@ -1,6 +1,7 @@
 package com.society.app.ui.viewmodel
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -11,6 +12,9 @@ import com.society.app.data.model.FundCategory
 import com.society.app.data.repository.SocietyRepository
 import com.society.app.util.CsvExporter
 import com.society.app.util.DateUtil
+import com.society.app.util.GeminiVisionService
+import com.society.app.util.ParsedCollectionRow
+import com.society.app.util.ParsedExpenseRow
 import com.society.app.util.PdfExporter
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -261,6 +265,103 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     fun deleteExpense(expense: ExpenseEntity) {
         viewModelScope.launch {
             repository.deleteExpense(expense)
+        }
+    }
+
+    // === GEMINI AI VISION & IMAGE SCANNING ===
+    private val _geminiApiKey = MutableStateFlow(repository.getGeminiApiKey())
+    val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
+
+    private val _isAiScanning = MutableStateFlow(false)
+    val isAiScanning: StateFlow<Boolean> = _isAiScanning.asStateFlow()
+
+    private val _aiScanError = MutableStateFlow<String?>(null)
+    val aiScanError: StateFlow<String?> = _aiScanError.asStateFlow()
+
+    private val _scannedCollections = MutableStateFlow<List<ParsedCollectionRow>?>(null)
+    val scannedCollections: StateFlow<List<ParsedCollectionRow>?> = _scannedCollections.asStateFlow()
+
+    private val _scannedExpense = MutableStateFlow<ParsedExpenseRow?>(null)
+    val scannedExpense: StateFlow<ParsedExpenseRow?> = _scannedExpense.asStateFlow()
+
+    fun saveGeminiApiKey(key: String) {
+        val trimmed = key.trim()
+        repository.saveGeminiApiKey(trimmed)
+        _geminiApiKey.value = trimmed
+    }
+
+    fun clearAiScanState() {
+        _isAiScanning.value = false
+        _aiScanError.value = null
+        _scannedCollections.value = null
+        _scannedExpense.value = null
+    }
+
+    fun scanCollectionImage(context: Context, imageUri: Uri) {
+        viewModelScope.launch {
+            _isAiScanning.value = true
+            _aiScanError.value = null
+            _scannedCollections.value = null
+
+            val result = GeminiVisionService.extractCollectionsFromImage(
+                context = context,
+                imageUri = imageUri,
+                apiKey = _geminiApiKey.value
+            )
+
+            result.onSuccess { rows ->
+                _scannedCollections.value = rows
+            }.onFailure { err ->
+                _aiScanError.value = err.message ?: "Failed to extract collection records from image."
+            }
+
+            _isAiScanning.value = false
+        }
+    }
+
+    fun scanExpenseImage(context: Context, imageUri: Uri) {
+        viewModelScope.launch {
+            _isAiScanning.value = true
+            _aiScanError.value = null
+            _scannedExpense.value = null
+
+            val result = GeminiVisionService.extractExpenseFromImage(
+                context = context,
+                imageUri = imageUri,
+                apiKey = _geminiApiKey.value
+            )
+
+            result.onSuccess { expense ->
+                _scannedExpense.value = expense
+            }.onFailure { err ->
+                _aiScanError.value = err.message ?: "Failed to extract expense details from bill."
+            }
+
+            _isAiScanning.value = false
+        }
+    }
+
+    fun saveBatchCollections(
+        items: List<ParsedCollectionRow>,
+        targetMonthYear: String,
+        targetCategory: String = _selectedCategory.value
+    ) {
+        viewModelScope.launch {
+            val currentDate = DateUtil.getCurrentDate()
+            val entities = items.map { item ->
+                CollectionEntity(
+                    category = targetCategory,
+                    monthYear = targetMonthYear,
+                    block = item.block.ifBlank { "General" },
+                    flatNo = item.flatNo,
+                    ownerName = item.ownerName.ifBlank { "Resident" },
+                    amount = item.amount,
+                    paymentMode = item.paymentMode,
+                    date = currentDate
+                )
+            }
+            repository.addCollections(entities)
+            clearAiScanState()
         }
     }
 

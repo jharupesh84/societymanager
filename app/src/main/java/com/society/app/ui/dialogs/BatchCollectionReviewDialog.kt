@@ -1,0 +1,338 @@
+package com.society.app.ui.dialogs
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.society.app.data.model.FundCategory
+import com.society.app.util.DateUtil
+import com.society.app.util.ParsedCollectionRow
+
+@Composable
+fun BatchCollectionReviewDialog(
+    initialRows: List<ParsedCollectionRow>,
+    selectedCategory: String,
+    onDismiss: () -> Unit,
+    onConfirmImport: (List<ParsedCollectionRow>, String) -> Unit
+) {
+    val isMonthly = selectedCategory == FundCategory.CATEGORY_MAINTENANCE
+    var monthYearInput by remember { mutableStateOf(DateUtil.getCurrentMonthYear()) }
+
+    // Mutable list of items for in-place editing
+    val editableRows = remember {
+        mutableStateListOf<MutableCollectionRow>().apply {
+            addAll(initialRows.map {
+                MutableCollectionRow(
+                    block = it.block,
+                    flatNo = it.flatNo,
+                    ownerName = it.ownerName,
+                    amount = it.amount.toString(),
+                    paymentMode = it.paymentMode
+                )
+            })
+        }
+    }
+
+    val totalAmount = editableRows.sumOf { it.amount.toDoubleOrNull() ?: 0.0 }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.92f)
+                .padding(vertical = 12.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = Color(0xFFD97706),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "AI Extracted Collections",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "${editableRows.size} records found • Total: ₹${"%.0f".format(totalAmount)}",
+                            fontSize = 13.sp,
+                            color = Color(0xFF16A34A),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Target category and month selection
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Category", fontSize = 11.sp, color = Color(0xFF64748B))
+                        Text(selectedCategory, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    }
+
+                    if (isMonthly) {
+                        OutlinedTextField(
+                            value = monthYearInput,
+                            onValueChange = { monthYearInput = it },
+                            label = { Text("Target Month", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.width(160.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Review, edit, or remove any records before saving:",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Editable List of Rows
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(editableRows) { index, row ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(10.dp)),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFA)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "#${index + 1}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF64748B),
+                                        modifier = Modifier.width(28.dp)
+                                    )
+
+                                    // Flat input (e.g. B-504)
+                                    OutlinedTextField(
+                                        value = row.flatNo,
+                                        onValueChange = {
+                                            row.flatNo = it
+                                            if (it.contains("-")) {
+                                                row.block = it.substringBefore("-").trim()
+                                            }
+                                        },
+                                        label = { Text("Flat", fontSize = 11.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.width(95.dp)
+                                    )
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    // Name input
+                                    OutlinedTextField(
+                                        value = row.ownerName,
+                                        onValueChange = { row.ownerName = it },
+                                        label = { Text("Resident Name", fontSize = 11.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    IconButton(
+                                        onClick = { editableRows.removeAt(index) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Remove row",
+                                            tint = Color(0xFFDC2626),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Spacer(modifier = Modifier.width(28.dp))
+
+                                    // Amount input
+                                    OutlinedTextField(
+                                        value = row.amount,
+                                        onValueChange = { row.amount = it },
+                                        label = { Text("Amount (₹)", fontSize = 11.sp) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.width(130.dp)
+                                    )
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    // Payment Mode Toggle: Online / Cash
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .background(Color(0xFFE2E8F0), RoundedCornerShape(8.dp))
+                                            .padding(2.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = row.paymentMode.equals("Online", ignoreCase = true),
+                                            onClick = { row.paymentMode = "Online" },
+                                            label = { Text("Online", fontSize = 11.sp) },
+                                            shape = RoundedCornerShape(6.dp)
+                                        )
+                                        FilterChip(
+                                            selected = row.paymentMode.equals("Cash", ignoreCase = true),
+                                            onClick = { row.paymentMode = "Cash" },
+                                            label = { Text("Cash", fontSize = 11.sp) },
+                                            shape = RoundedCornerShape(6.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        OutlinedButton(
+                            onClick = {
+                                editableRows.add(
+                                    MutableCollectionRow(
+                                        block = "General",
+                                        flatNo = "",
+                                        ownerName = "",
+                                        amount = "",
+                                        paymentMode = "Online"
+                                    )
+                                )
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add Another Row", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Bottom actions
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Cancel")
+                    }
+
+                    Button(
+                        onClick = {
+                            val verified = editableRows.mapNotNull { row ->
+                                val amt = row.amount.toDoubleOrNull() ?: 0.0
+                                if (row.flatNo.isNotBlank() || amt > 0) {
+                                    var blk = row.block.trim()
+                                    if (blk.isBlank() && row.flatNo.contains("-")) {
+                                        blk = row.flatNo.substringBefore("-").trim()
+                                    }
+                                    ParsedCollectionRow(
+                                        block = if (blk.isNotBlank()) blk else "General",
+                                        flatNo = row.flatNo.trim(),
+                                        ownerName = row.ownerName.trim().ifBlank { "Resident" },
+                                        amount = amt,
+                                        paymentMode = row.paymentMode
+                                    )
+                                } else null
+                            }
+                            if (verified.isNotEmpty()) {
+                                onConfirmImport(verified, monthYearInput.trim())
+                            }
+                        },
+                        enabled = editableRows.isNotEmpty(),
+                        modifier = Modifier.weight(2f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
+                    ) {
+                        Text("Import All (${editableRows.size} Records)", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+class MutableCollectionRow(
+    initialBlock: String,
+    initialFlatNo: String,
+    initialOwnerName: String,
+    initialAmount: String,
+    initialPaymentMode: String
+) {
+    var block by mutableStateOf(initialBlock)
+    var flatNo by mutableStateOf(initialFlatNo)
+    var ownerName by mutableStateOf(initialOwnerName)
+    var amount by mutableStateOf(initialAmount)
+    var paymentMode by mutableStateOf(initialPaymentMode)
+}

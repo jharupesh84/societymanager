@@ -1,5 +1,8 @@
 package com.society.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -7,16 +10,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -24,14 +31,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.FundCategory
+import com.society.app.ui.dialogs.AiApiKeyDialog
+import com.society.app.ui.dialogs.BatchCollectionReviewDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 import com.society.app.util.DateUtil
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CollectionScreen(viewModel: SocietyViewModel) {
+    val context = LocalContext.current
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val collections by viewModel.collections.collectAsState()
+    val geminiApiKey by viewModel.geminiApiKey.collectAsState()
+    val isAiScanning by viewModel.isAiScanning.collectAsState()
+    val aiScanError by viewModel.aiScanError.collectAsState()
+    val scannedCollections by viewModel.scannedCollections.collectAsState()
+
+    var showApiKeyDialog by remember { mutableStateOf(false) }
 
     var flatInput by remember { mutableStateOf("") }
     var ownerName by remember { mutableStateOf("") }
@@ -44,9 +60,100 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     val monthOptions = remember { DateUtil.getMonthYearList() }
     val isMonthlyMaintenance = selectedCategory == FundCategory.CATEGORY_MAINTENANCE
 
+    // Photo picker launcher for AI table scanning
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.scanCollectionImage(context, uri)
+        }
+    }
+
     // Live preview of parsed block and flat
     val parsedPreview = remember(flatInput) {
         if (flatInput.isNotBlank()) viewModel.parseBlockAndFlat(flatInput) else null
+    }
+
+    // API Key Dialog
+    if (showApiKeyDialog) {
+        AiApiKeyDialog(
+            viewModel = viewModel,
+            onDismiss = { showApiKeyDialog = false }
+        )
+    }
+
+    // AI Scanning Progress Dialog
+    if (isAiScanning) {
+        AlertDialog(
+            onDismissRequest = { /* Prevent dismissing while running */ },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.5.dp,
+                        color = Color(0xFF1565C0)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("AI Table Scanning", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Gemini Vision is analyzing the image and reading table data...",
+                        fontSize = 14.sp,
+                        color = Color(0xFF334155)
+                    )
+                    Text(
+                        "Detecting blocks, flats, resident names, amounts, and payment modes.",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // AI Scan Error Dialog
+    aiScanError?.let { errText ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearAiScanState() },
+            title = { Text("AI Scan Result", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)) },
+            text = { Text(errText, fontSize = 14.sp) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.clearAiScanState()
+                        showApiKeyDialog = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                ) {
+                    Text("Check API Key")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.clearAiScanState() }) {
+                    Text("Dismiss")
+                }
+            }
+        )
+    }
+
+    // Batch Collection Review Dialog
+    scannedCollections?.let { rows ->
+        BatchCollectionReviewDialog(
+            initialRows = rows,
+            selectedCategory = selectedCategory,
+            onDismiss = { viewModel.clearAiScanState() },
+            onConfirmImport = { verifiedRows, targetMonth ->
+                viewModel.saveBatchCollections(
+                    items = verifiedRows,
+                    targetMonthYear = if (isMonthlyMaintenance) targetMonth else DateUtil.getCurrentMonthYear(),
+                    targetCategory = selectedCategory
+                )
+            }
+        )
     }
 
     LazyColumn(
@@ -103,7 +210,92 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
             }
         }
 
-        // Form Card
+        // AI Batch Import Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFF16A34A),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "AI Batch Import from Image",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Color(0xFF14532D)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { showApiKeyDialog = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = "AI Settings",
+                                tint = Color(0xFF16A34A),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Upload any table image, ledger sheet, or WhatsApp screenshot. AI will extract all flats, names, amounts, and payment modes automatically.",
+                        fontSize = 12.sp,
+                        color = Color(0xFF166534),
+                        lineHeight = 17.sp
+                    )
+
+                    Button(
+                        onClick = {
+                            if (geminiApiKey.isBlank()) {
+                                showApiKeyDialog = true
+                            } else {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TableChart,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Select / Scan Table Image",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Manual Entry Form Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -113,8 +305,8 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
                     Text(
-                        text = if (isMonthlyMaintenance) "Enter Monthly Maintenance" else "Enter $selectedCategory Collection",
-                        fontSize = 17.sp,
+                        text = if (isMonthlyMaintenance) "Enter Single Maintenance Record" else "Enter Single $selectedCategory Record",
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1565C0)
                     )

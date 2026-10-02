@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Home
@@ -18,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.society.app.data.model.FundCategory
+import com.society.app.ui.dialogs.AiApiKeyDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,12 +37,20 @@ fun MainScreen(
 
     var showEditDialog by remember { mutableStateOf(false) }
     var editNameInput by remember { mutableStateOf("") }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
 
     val headerColor = when (selectedCategory) {
         FundCategory.CATEGORY_MAINTENANCE -> Color(0xFF1565C0) // Royal Blue
         FundCategory.CATEGORY_NAVRATRI -> Color(0xFFC2410C)    // Festive Orange
         FundCategory.CATEGORY_GANPATI -> Color(0xFFB45309)     // Festive Amber
         else -> Color(0xFF0F766E)                             // Teal
+    }
+
+    if (showApiKeyDialog) {
+        AiApiKeyDialog(
+            viewModel = viewModel,
+            onDismiss = { showApiKeyDialog = false }
+        )
     }
 
     if (showEditDialog) {
@@ -134,6 +144,14 @@ fun MainScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showApiKeyDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "AI Settings",
+                            tint = Color.White
+                        )
+                    }
+
                     FilledTonalButton(
                         onClick = onBackToWelcome,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -146,7 +164,7 @@ fun MainScreen(
                         Text("Switch Fund", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
 
                     IconButton(onClick = onLogout) {
                         Icon(
