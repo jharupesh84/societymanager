@@ -311,7 +311,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         OFFLINE_MLKIT
     }
 
-    private val _scanEngine = MutableStateFlow(ScanEngine.GEMINI_CLOUD)
+    private val _scanEngine = MutableStateFlow(ScanEngine.OFFLINE_MLKIT)
     val scanEngine: StateFlow<ScanEngine> = _scanEngine.asStateFlow()
 
     private val _geminiApiKey = MutableStateFlow(repository.getGeminiApiKey())

@@ -360,39 +360,8 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                         lineHeight = 17.sp
                     )
 
-                    // 1-Tap Direct Test Scan Button
+                    // Primary Action: Upload & Scan Image
                     Button(
-                        onClick = {
-                            if (isCloud && geminiApiKey.isBlank()) {
-                                showApiKeyDialog = true
-                            } else {
-                                val sampleUri = SampleImageHelper.getSampleTableImageUri(context)
-                                if (sampleUri != null) {
-                                    viewModel.scanCollectionImage(context, sampleUri)
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = if (isCloud) Icons.Default.AutoAwesome else Icons.Default.TableChart,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isCloud) "⚡ Scan Test Image (Gemini AI)" else "⚡ Scan Test Image (Offline ML Kit)",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-
-                    // Choose Image from Gallery
-                    OutlinedButton(
                         onClick = {
                             if (isCloud && geminiApiKey.isBlank()) {
                                 showApiKeyDialog = true
@@ -402,21 +371,45 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                                 )
                             }
                         },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
+                        ),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.TableChart,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
+                            modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isCloud) "Choose Image from Gallery (Gemini AI)" else "Choose Image from Gallery (Offline OCR)",
+                            text = if (isCloud) "📷 Upload Image to Scan (Gemini AI)" else "📷 Upload Image to Scan (Offline OCR)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    // Alternative: Paste WhatsApp / Text Table (Offline & Instant)
+                    OutlinedButton(
+                        onClick = { showPasteDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentPaste,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = Color(0xFF475569)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "📋 Paste WhatsApp / Text Table (Offline)",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp,
-                            color = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
+                            color = Color(0xFF475569)
                         )
                     }
 
@@ -701,9 +694,15 @@ fun CollectionItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val flatBadge = when {
+                        collection.flatNo.startsWith("${collection.block}-", ignoreCase = true) -> collection.flatNo
+                        collection.flatNo.startsWith(collection.block, ignoreCase = true) && collection.flatNo.length > collection.block.length -> collection.flatNo
+                        collection.block.isNotBlank() && collection.block != "General" -> "${collection.block}-${collection.flatNo}"
+                        else -> collection.flatNo
+                    }
                     SuggestionChip(
                         onClick = {},
-                        label = { Text("Block ${collection.block} - ${collection.flatNo}", fontWeight = FontWeight.SemiBold) },
+                        label = { Text(flatBadge, fontWeight = FontWeight.SemiBold) },
                         shape = RoundedCornerShape(8.dp)
                     )
                     SuggestionChip(

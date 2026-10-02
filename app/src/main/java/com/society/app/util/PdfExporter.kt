@@ -150,7 +150,13 @@ object PdfExporter {
             totalAmount += item.amount
             if (item.paymentMode.equals("Cash", ignoreCase = true)) totalCash += item.amount else totalOnline += item.amount
 
-            canvas.drawText("${item.block}-${item.flatNo}", colFlat, y, rowPaint)
+            val displayFlat = when {
+                item.flatNo.startsWith("${item.block}-", ignoreCase = true) -> item.flatNo
+                item.flatNo.startsWith(item.block, ignoreCase = true) && item.flatNo.length > item.block.length -> item.flatNo
+                item.block.isNotBlank() && item.block != "General" -> "${item.block}-${item.flatNo}"
+                else -> item.flatNo
+            }
+            canvas.drawText(displayFlat, colFlat, y, rowPaint)
             canvas.drawText(item.ownerName.take(24), colOwner, y, rowPaint)
             canvas.drawText(if (item.monthYear.isNotBlank()) item.monthYear.take(14) else "-", colMonth, y, rowPaint)
             canvas.drawText(item.paymentMode, colMode, y, rowPaint)

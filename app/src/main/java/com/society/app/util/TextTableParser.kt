@@ -7,18 +7,18 @@ package com.society.app.util
 object TextTableParser {
 
     val SAMPLE_TABLE_TEXT = """
-        B-504, Rupesh Jha, 2100, Online
-        G-302, Kamlesh Agrawal, 1500, Cash
-        C-504, Santosh Mishra, 2100, Online
-        B-201, Amit Sharma, 2100, Online
-        A-102, Rajesh Verma, 1800, Cash
-        D-403, Priya Nair, 2100, Online
-        E-301, Vikram Patel, 2500, Online
-        F-204, Sunita Rao, 1500, Cash
-        A-501, Suresh Gupta, 2100, Online
-        C-103, Deepak Joshi, 2100, Online
-        G-104, Manoj Tiwari, 1500, Cash
-        B-302, Neha Kulkarni, 2100, Online
+        B, B-504, Rupesh Jha, 2100, Online
+        G, G-302, Kamlesh Agrawal, 1500, Online
+        C, C-504, Nitish Jha, 1500, Online
+        G, G-503, R K Dubey, 1500, Online
+        A, A-501, Sanotsh Mishra, 2100, Cash
+        B, B-402, Rajesh Hirwani, 1501, Online
+        F, F-101, Rakhi Pandey, 1200, Online
+        B, B-502, Jitendra Ji, 1200, Online
+        B, B-401, Parul Biswas, 1501, Online
+        E, E-502, Rakesh Kumar Pal, 1200, Online
+        G, G-102, Rahul Chavada, 1200, Cash
+        G, G-303, Pratap Bhai, 1200, Cash
     """.trimIndent()
 
     /**
@@ -112,9 +112,18 @@ object TextTableParser {
             if (flatMatch != null && flatStr.isBlank()) {
                 val blockPart = flatMatch.groupValues[1].uppercase()
                 val numPart = flatMatch.groupValues[2]
-                blockStr = blockPart
+                if (blockPart.isNotBlank()) blockStr = blockPart
                 flatStr = if (blockPart.isNotBlank()) "$blockPart-$numPart" else numPart
                 continue
+            }
+
+            // 4. Check if token is standalone Block column (e.g. "A", "B", "C", "Block A", "Wing G")
+            val blockOnlyMatch = Regex("^(?:Block|Wing)?\\s*([A-Za-z])$", RegexOption.IGNORE_CASE).find(token)
+            if (blockOnlyMatch != null) {
+                if (blockStr.isBlank()) {
+                    blockStr = blockOnlyMatch.groupValues[1].uppercase()
+                }
+                continue // Consume block token without adding to name
             }
 
             remainingTokens.add(token)
@@ -128,7 +137,7 @@ object TextTableParser {
                 if (match != null) {
                     val blockPart = match.groupValues[1].uppercase()
                     val numPart = match.groupValues[2]
-                    blockStr = blockPart
+                    if (blockPart.isNotBlank()) blockStr = blockPart
                     flatStr = if (blockPart.isNotBlank()) "$blockPart-$numPart" else numPart
                     remainingTokens.removeAt(i)
                     break
@@ -150,6 +159,15 @@ object TextTableParser {
             }
         }
 
+        // Clean out any leftover single-letter block or header artifacts from name
+        remainingTokens.removeAll {
+            it.equals(blockStr, ignoreCase = true) ||
+            it.matches(Regex("^(?:Block|Wing)?\\s*([A-Za-z])$", RegexOption.IGNORE_CASE)) ||
+            it.equals("Block", ignoreCase = true) ||
+            it.equals("Flat", ignoreCase = true) ||
+            it.equals("Wing", ignoreCase = true)
+        }
+
         // Remaining tokens compose the owner/resident name
         nameStr = remainingTokens.joinToString(" ")
             .replace(Regex("^[0-9]+[.)\\-]\\s*"), "") // remove numbering like "1."
@@ -163,10 +181,22 @@ object TextTableParser {
             blockStr = if (flatStr.contains("-")) flatStr.substringBefore("-").trim() else "A"
         }
 
-        if (flatStr.isNotBlank() || amountVal > 0.0) {
+        // Standardize flat string so it does not repeat block
+        val cleanFlat = when {
+            flatStr.startsWith("$blockStr-", ignoreCase = true) -> flatStr
+            flatStr.startsWith(blockStr, ignoreCase = true) && flatStr.length > blockStr.length -> {
+                "$blockStr-${flatStr.removePrefix(blockStr).removePrefix("-")}"
+            }
+            blockStr.isNotBlank() && blockStr != "General" && !flatStr.contains("-") -> {
+                "$blockStr-$flatStr"
+            }
+            else -> flatStr
+        }
+
+        if (cleanFlat.isNotBlank() || amountVal > 0.0) {
             return ParsedCollectionRow(
                 block = blockStr.ifBlank { "A" },
-                flatNo = flatStr.ifBlank { "101" },
+                flatNo = cleanFlat.ifBlank { "101" },
                 ownerName = nameStr,
                 amount = amountVal,
                 paymentMode = paymentMode
