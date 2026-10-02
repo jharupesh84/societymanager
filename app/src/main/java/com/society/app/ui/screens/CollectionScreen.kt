@@ -332,17 +332,6 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                         )
                     }
 
-                    Text(
-                        text = if (isCloud) {
-                            "Gemini 3.8 Flash Vision reads ledger tables, complex layouts, and WhatsApp screenshots automatically via Google AI."
-                        } else {
-                            "100% On-Device OCR powered by Google ML Kit. Runs completely offline on your device with no API key or internet required."
-                        },
-                        fontSize = 12.sp,
-                        color = if (isCloud) Color(0xFF166534) else Color(0xFF0369A1),
-                        lineHeight = 17.sp
-                    )
-
                     // Primary Action: Upload & Scan Image
                     Button(
                         onClick = {
