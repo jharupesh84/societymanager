@@ -33,15 +33,16 @@ data class ParsedExpenseRow(
 
 object GeminiVisionService {
 
-    // gemini-3.8-flash is the updated active model as instructed by Google Gemini API
+    // Models with high production quotas (1,500 requests/day on free tier) first,
+    // followed by experimental/preview models (which often have a 20 requests/day cap).
     private val CANDIDATE_MODELS = listOf(
-        "gemini-3.8-flash",
         "gemini-2.5-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
-        "gemini-flash-latest",
         "gemini-2.0-flash",
-        "gemini-2.0-flash-lite"
+        "gemini-1.5-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-flash-latest",
+        "gemini-1.5-flash-latest",
+        "gemini-3.8-flash"
     )
     private var cachedWorkingModel: String? = null
     private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -148,6 +149,14 @@ object GeminiVisionService {
                 lower.contains("resource_exhausted") ||
                 lower.contains("resource exhausted") ||
                 lower.contains("rate limit") ||
+                lower.contains("rate-limit") ||
+                lower.contains("rate_limit") ||
+                lower.contains("quota") ||
+                lower.contains("exceeded") ||
+                lower.contains("limit") ||
+                lower.contains("free_tier") ||
+                lower.contains("too many requests") ||
+                lower.contains("billing") ||
                 lower.contains("503") ||
                 lower.contains("429")
     }
@@ -185,7 +194,7 @@ object GeminiVisionService {
 
         var lastError: Exception? = null
 
-        // 2. Iterate through candidate models (gemini-3.8-flash, gemini-2.5-flash, gemini-1.5-flash, etc.)
+        // 2. Iterate through candidate models (gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-flash, etc.)
         for (model in CANDIDATE_MODELS) {
             try {
                 val res = executeGenerateContent(apiKey, model, prompt, base64Jpeg)
@@ -331,7 +340,8 @@ object GeminiVisionService {
             return extractTextFromGeminiResponse(responseText)
         } else {
             val errorText = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-            throw Exception(parseGeminiErrorMessage(errorText))
+            val parsedMsg = parseGeminiErrorMessage(errorText)
+            throw Exception("$parsedMsg [HTTP $responseCode]")
         }
     }
 
@@ -354,7 +364,12 @@ object GeminiVisionService {
             val root = JSONObject(errorJsonStr)
             val errorObj = root.optJSONObject("error")
             val message = errorObj?.optString("message") ?: errorJsonStr
-            "AI Error: $message"
+            val status = errorObj?.optString("status") ?: ""
+            if (status.isNotBlank()) {
+                "AI Error: $message [Status: $status]"
+            } else {
+                "AI Error: $message"
+            }
         } catch (e: Exception) {
             "AI Error: $errorJsonStr"
         }

@@ -370,11 +370,34 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
             _scannedCollections.value = null
 
             val result = if (engine == ScanEngine.GEMINI_CLOUD) {
-                GeminiVisionService.extractCollectionsFromImage(
+                val cloudResult = GeminiVisionService.extractCollectionsFromImage(
                     context = context,
                     imageUri = imageUri,
                     apiKey = _geminiApiKey.value
                 )
+                if (cloudResult.isFailure) {
+                    val err = cloudResult.exceptionOrNull()?.message.orEmpty().lowercase()
+                    if (err.contains("quota") || err.contains("exceeded") || err.contains("rate") ||
+                        err.contains("limit") || err.contains("429") || err.contains("503") ||
+                        err.contains("connect") || err.contains("timeout") || err.contains("resource")
+                    ) {
+                        // Automatically fall back to local on-device ML Kit OCR
+                        val offlineResult = MlKitOcrService.extractCollectionsFromImage(
+                            context = context,
+                            imageUri = imageUri
+                        )
+                        if (offlineResult.isSuccess) {
+                            _statusMessage.value = "Gemini quota limit reached. Recovered records using On-Device Offline OCR!"
+                            offlineResult
+                        } else {
+                            cloudResult
+                        }
+                    } else {
+                        cloudResult
+                    }
+                } else {
+                    cloudResult
+                }
             } else {
                 MlKitOcrService.extractCollectionsFromImage(
                     context = context,
@@ -400,11 +423,33 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
             _scannedExpense.value = null
 
             val result = if (engine == ScanEngine.GEMINI_CLOUD) {
-                GeminiVisionService.extractExpenseFromImage(
+                val cloudResult = GeminiVisionService.extractExpenseFromImage(
                     context = context,
                     imageUri = imageUri,
                     apiKey = _geminiApiKey.value
                 )
+                if (cloudResult.isFailure) {
+                    val err = cloudResult.exceptionOrNull()?.message.orEmpty().lowercase()
+                    if (err.contains("quota") || err.contains("exceeded") || err.contains("rate") ||
+                        err.contains("limit") || err.contains("429") || err.contains("503") ||
+                        err.contains("connect") || err.contains("timeout") || err.contains("resource")
+                    ) {
+                        val offlineResult = MlKitOcrService.extractExpenseFromImage(
+                            context = context,
+                            imageUri = imageUri
+                        )
+                        if (offlineResult.isSuccess) {
+                            _statusMessage.value = "Gemini quota limit reached. Recovered expense using On-Device Offline OCR!"
+                            offlineResult
+                        } else {
+                            cloudResult
+                        }
+                    } else {
+                        cloudResult
+                    }
+                } else {
+                    cloudResult
+                }
             } else {
                 MlKitOcrService.extractExpenseFromImage(
                     context = context,

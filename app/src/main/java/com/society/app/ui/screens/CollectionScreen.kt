@@ -132,7 +132,7 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         text = if (isCloud)
-                            "Gemini Vision (3.8 Flash) is analyzing the image and reading table data..."
+                            "Gemini Vision AI is analyzing the image and reading table data..."
                         else
                             "Google ML Kit is reading the image directly on your device (100% offline)...",
                         fontSize = 14.sp,
@@ -385,26 +385,6 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                         )
                     }
 
-                    // Alternative: Paste WhatsApp / Text Table (Offline & Instant)
-                    OutlinedButton(
-                        onClick = { showPasteDialog = true },
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentPaste,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = Color(0xFF475569)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "📋 Paste WhatsApp / Text Table (Offline)",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = Color(0xFF475569)
-                        )
-                    }
                 }
             }
         }

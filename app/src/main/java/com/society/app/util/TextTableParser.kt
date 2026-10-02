@@ -84,26 +84,40 @@ object TextTableParser {
     }
 
     private fun isHeaderOrTitleLine(line: String): Boolean {
-        val lower = line.lowercase()
-        // Skip document title, society name, address, or table column header lines
-        if (lower.contains("maintenance:") || lower.contains("collection:") ||
-            lower.contains("enclave") || lower.contains("society") ||
-            lower.contains("ahmedabad") || lower.contains("gujarat") ||
-            lower.contains("kuber nagar") || lower.contains("bangla area") ||
-            lower.contains("saijpur") || lower.contains("ser no") ||
-            lower.contains("sr no") || lower.contains("date of deposit") ||
-            lower.contains("period from") || lower.contains("bal due") ||
-            lower.contains("late fee") || lower.contains("rupees only") ||
-            lower.contains("total (rupees") || lower.contains("navratri ke") ||
-            lower.contains("signature") || lower.contains("sign")
+        val lower = line.lowercase().trim()
+        val hasDigits = line.any { it.isDigit() }
+
+        // If line has no digits at all, it cannot be a collection row (rows need flat & amount)
+        if (!hasDigits) return true
+
+        // Check if it's explicitly the top society title or document header line
+        if ((lower.contains("maintenance:") || lower.contains("collection:")) &&
+            (lower.contains("block") || lower.contains("wing") || lower.contains("register"))
+        ) {
+            return true
+        }
+        if (lower.contains("society reg") || lower.contains("pin code") || lower.contains("ahmedabad - 38")) {
+            return true
+        }
+
+        // Check if it's a summary/total line at the bottom
+        if (lower.startsWith("total") || lower.contains("grand total") ||
+            lower.contains("total (rupees") || lower.contains("total rupees") ||
+            lower.contains("total amount")
         ) {
             return true
         }
 
-        val hasHeaderKeywords = (lower.contains("block") || lower.contains("flat") || lower.contains("unit")) &&
-                (lower.contains("name") || lower.contains("owner") || lower.contains("resident") || lower.contains("amount"))
-        val hasDigits = line.any { it.isDigit() }
-        return hasHeaderKeywords && !hasDigits
+        // Table column header line (e.g. "Sr No Flat No Name Amount Signature")
+        val hasColKeywords = (lower.contains("block") || lower.contains("flat") || lower.contains("unit")) &&
+                (lower.contains("name") || lower.contains("owner") || lower.contains("resident")) &&
+                (lower.contains("amount") || lower.contains("mode") || lower.contains("sign"))
+        if (hasColKeywords && !lower.contains("1200") && !lower.contains("1500") && !lower.contains("2000") && !lower.contains("2100")) {
+            val numCount = Regex("""\b\d+\b""").findAll(line).count()
+            if (numCount <= 1) return true
+        }
+
+        return false
     }
 
     private fun parseLine(line: String, defaultBlock: String?): ParsedCollectionRow? {
@@ -123,6 +137,38 @@ object TextTableParser {
         }
 
         return parseUnstructuredLine(line, defaultBlock)
+    }
+
+    fun extractAmountFromToken(token: String): Double? {
+        val clean = token.replace("₹", "")
+            .replace("Rs.", "", ignoreCase = true)
+            .replace("Rs", "", ignoreCase = true)
+            .replace("/-", "")
+            .replace("/=", "")
+            .replace("/", "")
+            .replace("=", "")
+            .replace("|", "")
+            .replace(",", "")
+            .trim()
+
+        val match = Regex("""([0-9]+(?:\.[0-9]{1,2})?)""").find(clean) ?: return null
+        val numStr = match.groupValues[1]
+        var amt = numStr.toDoubleOrNull() ?: return null
+
+        // If OCR recognized 1200 as 12.00 or 1500 as 15.00
+        if (amt in 10.0..99.0 && clean.contains(".")) {
+            amt *= 100.0
+        }
+        return if (amt > 0.0) amt else null
+    }
+
+    fun extractFlatFromToken(token: String): Pair<String, String>? {
+        val clean = token.trim().trim('.', ',', '|', ':', ';', '#', '(', ')')
+        val match = Regex("""^([A-Za-z])?[-/\s]?([0-9]{1,4})$""").find(clean) ?: return null
+        val blockPart = match.groupValues[1].uppercase()
+        val numPart = match.groupValues[2]
+        val flatStr = if (blockPart.isNotBlank()) "$blockPart-$numPart" else numPart
+        return Pair(blockPart, flatStr)
     }
 
     private fun parseTokens(tokens: List<String>, defaultBlock: String?): ParsedCollectionRow? {
@@ -169,36 +215,27 @@ object TextTableParser {
                 continue
             }
 
-            // Amount check (e.g. 2100, 1500, ₹2100, 12.00, 1200 in OCR notation)
-            val cleanAmt = token.replace("₹", "").replace("Rs", "", ignoreCase = true)
-                .replace(".", "").replace(",", "").trim()
-            val parsedAmt = token.replace("₹", "").replace("Rs", "", ignoreCase = true)
-                .replace(",", "").trim().toDoubleOrNull()
-
-            // Handle OCR recognizing 1200 as 12.00 or 1500 as 15.00
-            val normalizedAmt = if (parsedAmt != null && parsedAmt in 10.0..99.0 && token.contains(".")) {
-                parsedAmt * 100.0 // e.g. 12.00 -> 1200.0
-            } else {
-                parsedAmt
-            }
-
-            if (normalizedAmt != null && normalizedAmt > 0 && amountVal == 0.0 && cleanAmt.all { it.isDigit() }) {
-                amountVal = normalizedAmt
+            // Amount check (e.g. 1200, 1500, ₹2100, 1200/-, Rs. 1500/-)
+            val parsedAmt = extractAmountFromToken(token)
+            if (parsedAmt != null && parsedAmt >= 100.0 && amountVal == 0.0) {
+                // If it's a 3-4 digit number, make sure we don't accidentally treat flat number as amount
+                // Flat numbers are usually smaller or checked separately, but if amountVal is not set, set it
+                amountVal = parsedAmt
                 continue
             }
 
             // Flat check (e.g. B-504, G-302, 101, 102, 504)
-            val flatMatch = Regex("^([A-Za-z])?[-/\\s]?([0-9]{3,4})$").find(token)
-            if (flatMatch != null && flatStr.isBlank()) {
-                val blockPart = flatMatch.groupValues[1].uppercase()
-                val numPart = flatMatch.groupValues[2]
+            val flatPair = extractFlatFromToken(token)
+            if (flatPair != null && flatStr.isBlank()) {
+                val blockPart = flatPair.first
+                val flatPart = flatPair.second
                 if (blockPart.isNotBlank()) blockStr = blockPart
-                flatStr = if (blockPart.isNotBlank()) "$blockPart-$numPart" else numPart
+                flatStr = flatPart
                 continue
             }
 
             // Standalone Block column (e.g. "A", "B", "G", "Block G", "Wing A")
-            val blockOnlyMatch = Regex("^(?:Block|Wing)?\\s*([A-Za-z])$", RegexOption.IGNORE_CASE).find(token)
+            val blockOnlyMatch = Regex("""^(?:Block|Wing)?\s*([A-Za-z])$""", RegexOption.IGNORE_CASE).find(token)
             if (blockOnlyMatch != null && blockOnlyMatch.groupValues[1].length == 1) {
                 if (blockStr.isBlank()) {
                     blockStr = blockOnlyMatch.groupValues[1].uppercase()
@@ -213,50 +250,53 @@ object TextTableParser {
         if (flatStr.isBlank()) {
             for (i in remainingTokens.indices) {
                 val t = remainingTokens[i]
-                val match = Regex("([A-Za-z])?[-/\\s]?([0-9]{3,4})").find(t)
-                if (match != null) {
-                    val blockPart = match.groupValues[1].uppercase()
-                    val numPart = match.groupValues[2]
+                val flatPair = extractFlatFromToken(t)
+                if (flatPair != null && flatPair.second.any { it.isDigit() }) {
+                    val blockPart = flatPair.first
+                    val flatPart = flatPair.second
                     if (blockPart.isNotBlank()) blockStr = blockPart
-                    flatStr = if (blockPart.isNotBlank()) "$blockPart-$numPart" else numPart
+                    flatStr = flatPart
                     remainingTokens.removeAt(i)
                     break
                 }
             }
         }
 
-        // If Amount was not found, check remaining tokens for a number
+        // If Amount was not found, check remaining tokens for an amount
         if (amountVal == 0.0) {
             for (i in remainingTokens.indices) {
                 val t = remainingTokens[i]
-                val match = Regex("([0-9]+(?:\\.[0-9]{1,2})?)").find(t.replace(",", ""))
-                var num = match?.groupValues?.get(1)?.toDoubleOrNull()
-                if (num != null && num in 10.0..99.0 && t.contains(".")) {
-                    num *= 100.0
-                }
-                if (num != null && num > 0) {
-                    amountVal = num
+                val parsedAmt = extractAmountFromToken(t)
+                if (parsedAmt != null && parsedAmt > 0) {
+                    amountVal = parsedAmt
                     remainingTokens.removeAt(i)
                     break
                 }
             }
         }
 
-        // Clean out stray serial numbers (e.g. "1", "2") and stray block letters ("A", "G") from name
-        remainingTokens.removeAll {
-            it.matches(Regex("^[0-9]{1,2}$")) ||
-            it.equals(blockStr, ignoreCase = true) ||
-            (defaultBlock != null && it.equals(defaultBlock, ignoreCase = true)) ||
-            it.matches(Regex("^(?:Block|Wing)?\\s*([A-Za-z])$", RegexOption.IGNORE_CASE)) ||
-            it.equals("Block", ignoreCase = true) ||
-            it.equals("Flat", ignoreCase = true) ||
-            it.equals("Wing", ignoreCase = true) ||
-            it.equals("-", ignoreCase = true) ||
-            it.equals("--", ignoreCase = true)
+        // Clean out stray keywords, boilerplate tokens, serial numbers, and block letters from name
+        val boilerplateRegex = Regex("""(?i)\b(?:sr\s*no|ser\s*no|date\s*of\s*deposit|period\s*from|bal\s*due|late\s*fee|rupees\s*only|signature|signed|sign|date|deposit|period)\b""")
+        remainingTokens.removeAll { t ->
+            val cleanT = t.trim().trim('.', ',', '|', ':', ';', '-')
+            cleanT.matches(Regex("^[0-9]{1,2}$")) ||
+            cleanT.equals(blockStr, ignoreCase = true) ||
+            (defaultBlock != null && cleanT.equals(defaultBlock, ignoreCase = true)) ||
+            cleanT.matches(Regex("""^(?:Block|Wing)?\s*([A-Za-z])$""", RegexOption.IGNORE_CASE)) ||
+            cleanT.equals("Block", ignoreCase = true) ||
+            cleanT.equals("Flat", ignoreCase = true) ||
+            cleanT.equals("Wing", ignoreCase = true) ||
+            cleanT.equals("Sign", ignoreCase = true) ||
+            cleanT.equals("Signature", ignoreCase = true) ||
+            cleanT.equals("Signed", ignoreCase = true) ||
+            cleanT.equals("-", ignoreCase = true) ||
+            cleanT.equals("--", ignoreCase = true) ||
+            boilerplateRegex.matches(cleanT)
         }
 
         // Remaining tokens compose the owner/resident name
         nameStr = remainingTokens.joinToString(" ")
+            .replace(boilerplateRegex, "")
             .replace(Regex("^[0-9]+[.)\\-]\\s*"), "")
             .trim()
 
