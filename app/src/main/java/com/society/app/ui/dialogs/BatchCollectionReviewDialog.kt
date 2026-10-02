@@ -52,6 +52,7 @@ fun BatchCollectionReviewDialog(
     }
 
     val totalAmount = editableRows.sumOf { it.amount.toDoubleOrNull() ?: 0.0 }
+    val totalFormatted = "%.0f".format(totalAmount)
     val paidCount = editableRows.count { (it.amount.toDoubleOrNull() ?: 0.0) > 0 }
 
     // Detected default block
@@ -101,7 +102,7 @@ fun BatchCollectionReviewDialog(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "$paidCount paid of ${editableRows.size} flats • Total: ₹${\"%.0f\".format(totalAmount)}",
+                            text = "$paidCount paid of ${editableRows.size} flats • Total: ₹$totalFormatted",
                             fontSize = 13.sp,
                             color = Color(0xFF16A34A),
                             fontWeight = FontWeight.SemiBold
