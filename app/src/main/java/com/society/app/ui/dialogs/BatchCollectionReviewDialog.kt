@@ -54,15 +54,12 @@ fun BatchCollectionReviewDialog(
     val totalAmount = editableRows.sumOf { it.amount.toDoubleOrNull() ?: 0.0 }
     val totalFormatted = "%.0f".format(totalAmount)
     val paidCount = editableRows.count { (it.amount.toDoubleOrNull() ?: 0.0) > 0 }
-
-    // Detected default block
-    val detectedInitialBlock = remember {
-        initialRows.firstOrNull { it.block.isNotBlank() && it.block != "General" && it.block != "A" }?.block
-            ?: initialRows.firstOrNull { it.block.isNotBlank() && it.block != "General" }?.block
-            ?: "G"
+    val validCount = editableRows.count {
+        val amt = it.amount.toDoubleOrNull() ?: 0.0
+        amt > 0.0 && it.flatNo.any { c -> c.isDigit() }
     }
-    var bulkBlockInput by remember { mutableStateOf(detectedInitialBlock) }
-    var showOnlyPaid by remember { mutableStateOf(false) }
+
+    var showOnlyPaid by remember { mutableStateOf(paidCount > 0 && paidCount < editableRows.size) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -102,7 +99,7 @@ fun BatchCollectionReviewDialog(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "$paidCount paid of ${editableRows.size} flats • Total: ₹$totalFormatted",
+                            text = "$validCount valid records • Total: ₹$totalFormatted",
                             fontSize = 13.sp,
                             color = Color(0xFF16A34A),
                             fontWeight = FontWeight.SemiBold
@@ -137,55 +134,20 @@ fun BatchCollectionReviewDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Bulk Block Tool and Filter Bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (paidCount in 1 until editableRows.size) {
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Block:", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF475569))
-                        OutlinedTextField(
-                            value = bulkBlockInput,
-                            onValueChange = { bulkBlockInput = it.uppercase() },
-                            singleLine = true,
-                            modifier = Modifier.width(55.dp),
-                            shape = RoundedCornerShape(6.dp)
+                        FilterChip(
+                            selected = showOnlyPaid,
+                            onClick = { showOnlyPaid = !showOnlyPaid },
+                            label = { Text(if (showOnlyPaid) "Only Paid ($paidCount)" else "Show All (${editableRows.size})", fontSize = 11.sp) },
+                            shape = RoundedCornerShape(8.dp)
                         )
-                        Button(
-                            onClick = {
-                                val b = bulkBlockInput.trim().uppercase()
-                                if (b.isNotBlank()) {
-                                    editableRows.forEach { row ->
-                                        row.block = b
-                                        val cleanNum = row.flatNo.replace(" ", "").replace("-", "")
-                                            .removePrefix(b)
-                                        row.flatNo = "$b-$cleanNum"
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                        ) {
-                            Text("Apply All", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        }
                     }
-
-                    FilterChip(
-                        selected = showOnlyPaid,
-                        onClick = { showOnlyPaid = !showOnlyPaid },
-                        label = { Text(if (showOnlyPaid) "Only Paid ($paidCount)" else "Show All (${editableRows.size})", fontSize = 11.sp) },
-                        shape = RoundedCornerShape(8.dp)
-                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -227,7 +189,7 @@ fun BatchCollectionReviewDialog(
                                         modifier = Modifier.width(28.dp)
                                     )
 
-                                    // Flat input (e.g. G-102)
+                                    // Flat input (e.g. B-504, G-302)
                                     OutlinedTextField(
                                         value = row.flatNo,
                                         onValueChange = {
@@ -238,7 +200,7 @@ fun BatchCollectionReviewDialog(
                                         },
                                         label = { Text("Flat", fontSize = 11.sp) },
                                         singleLine = true,
-                                        modifier = Modifier.width(100.dp)
+                                        modifier = Modifier.width(105.dp)
                                     )
 
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -311,11 +273,10 @@ fun BatchCollectionReviewDialog(
                     item {
                         OutlinedButton(
                             onClick = {
-                                val b = bulkBlockInput.ifBlank { "G" }
                                 editableRows.add(
                                     MutableCollectionRow(
-                                        block = b,
-                                        flatNo = "$b-",
+                                        block = "General",
+                                        flatNo = "",
                                         ownerName = "",
                                         amount = "",
                                         paymentMode = "Online"
@@ -349,25 +310,23 @@ fun BatchCollectionReviewDialog(
                         Text("Cancel")
                     }
 
-                    val importCount = if (paidCount > 0) paidCount else editableRows.size
                     Button(
                         onClick = {
                             val verified = editableRows.mapNotNull { row ->
                                 val amt = row.amount.toDoubleOrNull() ?: 0.0
-                                // If some rows have payments, import the paid ones; if none has payment, allow all with flat
-                                val shouldInclude = if (paidCount > 0) amt > 0.0 else row.flatNo.isNotBlank()
-                                if (shouldInclude) {
+                                val hasDigits = row.flatNo.any { it.isDigit() }
+                                if (hasDigits && amt > 0.0) {
                                     var blk = row.block.trim().uppercase()
                                     if (blk.isBlank() && row.flatNo.contains("-")) {
                                         blk = row.flatNo.substringBefore("-").trim().uppercase()
                                     }
-                                    val cleanFlat = if (blk.isNotBlank() && !row.flatNo.startsWith(blk)) {
+                                    val cleanFlat = if (blk.isNotBlank() && blk != "GENERAL" && !row.flatNo.startsWith(blk)) {
                                         "$blk-${row.flatNo.removePrefix("-")}"
                                     } else {
                                         row.flatNo.trim()
                                     }
                                     ParsedCollectionRow(
-                                        block = if (blk.isNotBlank()) blk else "G",
+                                        block = if (blk.isNotBlank()) blk else "General",
                                         flatNo = cleanFlat,
                                         ownerName = row.ownerName.trim().ifBlank { "Resident" },
                                         amount = amt,
@@ -379,12 +338,12 @@ fun BatchCollectionReviewDialog(
                                 onConfirmImport(verified, monthYearInput.trim())
                             }
                         },
-                        enabled = editableRows.isNotEmpty(),
+                        enabled = validCount > 0,
                         modifier = Modifier.weight(2f),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
                     ) {
-                        Text("Import ($importCount Records)", fontWeight = FontWeight.Bold)
+                        Text("Import ($validCount Records)", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -393,7 +352,7 @@ fun BatchCollectionReviewDialog(
 }
 
 class MutableCollectionRow(
-    block: String = "G",
+    block: String = "General",
     flatNo: String = "",
     ownerName: String = "",
     amount: String = "",

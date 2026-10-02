@@ -7,35 +7,53 @@ package com.society.app.util
 object TextTableParser {
 
     /**
-     * Inspects the document header (first 15 lines) to detect if the entire sheet belongs to a specific block.
+     * Inspects the document header to detect if the entire sheet belongs to a single specific block.
      * Examples:
      * - "MAINTENANCE: 'G' BLOCK - 20" -> "G"
      * - "MAINTENANCE : 'G' BLOCK" -> "G"
      * - "'G' BLOCK" -> "G"
-     * - "BLOCK: B" or "BLOCK - B" -> "B"
-     * - "BLOCK G" or "WING A" -> "G" or "A"
+     * If the document already contains multiple distinct blocks (e.g. B-504, G-302, A-501), returns null.
      */
     fun detectHeaderBlock(fullText: String): String? {
-        val headerSection = fullText.lines().take(15).joinToString("\n")
+        // 1. If text already has multiple distinct block prefixes (e.g. B-504, G-302, A-501),
+        // then this is clearly a multi-block document! Do NOT enforce any single header block.
+        val distinctPrefixes = Regex("""\b([A-Za-z])[-/][0-9]{3,4}\b""").findAll(fullText)
+            .map { it.groupValues[1].uppercase() }
+            .distinct()
+            .toList()
+        if (distinctPrefixes.size > 1) {
+            return null
+        }
+
+        // 2. Also check if multiple single-letter block tokens appear repeatedly (e.g. B, G, C, A, F, E)
+        val standaloneBlocks = Regex("""\b([A-G])\b""").findAll(fullText)
+            .map { it.groupValues[1].uppercase() }
+            .distinct()
+            .toList()
+        if (standaloneBlocks.size >= 3) {
+            return null
+        }
+
+        val headerSection = fullText.lines().take(8).joinToString("\n")
 
         // Pattern 1: 'G' BLOCK, "G" BLOCK, or MAINTENANCE: 'G' BLOCK, MAINTENANCE: 'G' BLOCK - 20
-        val regex1 = Regex("""(?:MAINTENANCE|COLLECTION)?[:\s]*['"‘“]?([A-Za-z0-9])['"’”]?\s*[-/_]?\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
+        val regex1 = Regex("""(?:MAINTENANCE|COLLECTION)?[:\s]*['"‘“]([A-Za-z0-9])['"’”]\s*[-/_]?\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
         val match1 = regex1.find(headerSection)
         if (match1 != null) {
             val b = match1.groupValues[1].uppercase()
             if (b.isNotBlank()) return b
         }
 
-        // Pattern 2: BLOCK: G, BLOCK - G, BLOCK 'G', BLOCK "G", BLOCK G, WING: A
-        val regex2 = Regex("""(?:BLOCK|WING)\s*[:\-_]?\s*['"‘“]?([A-Za-z0-9])['"’”]?\b""", RegexOption.IGNORE_CASE)
+        // Pattern 2: Standalone quoted letter followed by BLOCK anywhere in header
+        val regex2 = Regex("""['"‘“]([A-Za-z0-9])['"’”]\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
         val match2 = regex2.find(headerSection)
         if (match2 != null) {
             val b = match2.groupValues[1].uppercase()
             if (b.isNotBlank()) return b
         }
 
-        // Pattern 3: Standalone quoted letter followed by BLOCK anywhere in header
-        val regex3 = Regex("""['"‘“]([A-Za-z0-9])['"’”]\s*(?:BLOCK|WING)""", RegexOption.IGNORE_CASE)
+        // Pattern 3: Explicit MAINTENANCE / COLLECTION title with BLOCK / WING
+        val regex3 = Regex("""(?:MAINTENANCE|COLLECTION)\s*[:\-_]?\s*(?:BLOCK|WING)\s*[:\-_]?\s*([A-Za-z0-9])\b""", RegexOption.IGNORE_CASE)
         val match3 = regex3.find(headerSection)
         if (match3 != null) {
             val b = match3.groupValues[1].uppercase()
@@ -139,7 +157,7 @@ object TextTableParser {
                 continue
             }
 
-            // 2. Amount check (e.g. 1200, 1500, ₹2100, 12.00 in OCR notation)
+            // 2. Amount check (e.g. 2100, 1500, ₹2100, 12.00 in OCR notation)
             val cleanAmt = token.replace("₹", "").replace("Rs", "", ignoreCase = true)
                 .replace(".", "").replace(",", "").trim()
             val parsedAmt = token.replace("₹", "").replace("Rs", "", ignoreCase = true)
@@ -268,10 +286,12 @@ object TextTableParser {
             else -> flatStr
         }
 
-        if (cleanFlat.isNotBlank() || amountVal > 0.0) {
+        // A valid collection row MUST have a flat number with digits AND a positive amount!
+        val hasDigitsInFlat = cleanFlat.any { it.isDigit() }
+        if (hasDigitsInFlat && amountVal > 0.0) {
             return ParsedCollectionRow(
                 block = effectiveBlock,
-                flatNo = cleanFlat.ifBlank { if (effectiveBlock != "General") "$effectiveBlock-101" else "101" },
+                flatNo = cleanFlat,
                 ownerName = nameStr,
                 amount = amountVal,
                 paymentMode = paymentMode

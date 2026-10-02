@@ -47,16 +47,19 @@ object MlKitOcrService {
             // Automatic header block detection (e.g. "MAINTENANCE: 'G' BLOCK - 20" -> "G")
             val detectedHeaderBlock = TextTableParser.detectHeaderBlock(visionText.text)
 
-            // Strategy 1: Parse visionText.text directly
-            val rowsFromRaw = TextTableParser.parse(visionText.text, detectedHeaderBlock)
-
-            // Strategy 2: Reconstruct rows by clustering line bounding boxes by vertical Y-center
+            // Strategy 1: Reconstruct rows by clustering line bounding boxes by vertical Y-center & overlap
             val rowsFromClustering = parseByRowClustering(visionText, detectedHeaderBlock)
 
-            val finalRows = if (rowsFromClustering.size >= rowsFromRaw.size && rowsFromClustering.isNotEmpty()) {
-                rowsFromClustering
+            // Strategy 2: Parse visionText.text directly
+            val rowsFromRaw = TextTableParser.parse(visionText.text, detectedHeaderBlock)
+
+            val validClustered = rowsFromClustering.filter { it.amount > 0 && it.flatNo.any { c -> c.isDigit() } }
+            val validRaw = rowsFromRaw.filter { it.amount > 0 && it.flatNo.any { c -> c.isDigit() } }
+
+            val finalRows = if (validClustered.isNotEmpty()) {
+                validClustered
             } else {
-                rowsFromRaw
+                validRaw
             }
 
             if (finalRows.isEmpty()) {
@@ -150,39 +153,57 @@ object MlKitOcrService {
     }
 
     /**
-     * Reconstructs table rows by grouping OCR text elements that share similar vertical Y coordinates.
+     * Reconstructs table rows by grouping OCR text elements that share similar vertical Y coordinates and overlap.
      */
     private fun parseByRowClustering(visionText: Text, defaultBlock: String? = null): List<ParsedCollectionRow> {
-        val lines = visionText.textBlocks.flatMap { it.lines }
+        val lines = visionText.textBlocks.flatMap { it.lines }.filter { it.text.isNotBlank() }
         if (lines.isEmpty()) return emptyList()
 
-        // Estimate average line height
-        val avgHeight = lines.mapNotNull { it.boundingBox?.height() }.average().takeIf { !it.isNaN() && it > 0 } ?: 30.0
-        val tolerance = avgHeight * 0.65
+        class ClusterRow(first: Text.Line) {
+            val items = mutableListOf(first)
+            var top = first.boundingBox?.top ?: 0
+            var bottom = first.boundingBox?.bottom ?: 0
+            val centerY: Int get() = (top + bottom) / 2
+            val height: Int get() = kotlin.math.max(1, bottom - top)
 
-        val rows = mutableListOf<MutableList<Text.Line>>()
+            fun matches(line: Text.Line): Boolean {
+                val box = line.boundingBox ?: return false
+                val overlap = kotlin.math.min(bottom, box.bottom) - kotlin.math.max(top, box.top)
+                val minH = kotlin.math.min(height, box.height())
+                if (overlap > 0 && overlap >= minH * 0.35) return true
 
-        // Sort lines primarily by top Y position
+                val dist = kotlin.math.abs(centerY - box.centerY())
+                return dist <= kotlin.math.max(height, box.height()) * 0.8
+            }
+
+            fun add(line: Text.Line) {
+                items.add(line)
+                val box = line.boundingBox ?: return
+                top = kotlin.math.min(top, box.top)
+                bottom = kotlin.math.max(bottom, box.bottom)
+            }
+        }
+
         val sortedLines = lines.sortedBy { it.boundingBox?.top ?: 0 }
+        val clusterRows = mutableListOf<ClusterRow>()
 
         for (line in sortedLines) {
-            val lineY = line.boundingBox?.centerY() ?: continue
-            val existingRow = rows.find { row ->
-                val rowY = row.firstOrNull()?.boundingBox?.centerY() ?: return@find false
-                abs(rowY - lineY) <= tolerance
-            }
-            if (existingRow != null) {
-                existingRow.add(line)
+            if (line.boundingBox == null) continue
+            val matchedRow = clusterRows.find { it.matches(line) }
+            if (matchedRow != null) {
+                matchedRow.add(line)
             } else {
-                rows.add(mutableListOf(line))
+                clusterRows.add(ClusterRow(line))
             }
         }
 
         // For each clustered row, sort items left-to-right (X position)
-        val reconstructedText = rows.map { rowItems ->
-            rowItems.sortedBy { it.boundingBox?.left ?: 0 }
-                .joinToString(", ") { it.text.trim() }
-        }.joinToString("\n")
+        val reconstructedText = clusterRows
+            .sortedBy { it.top }
+            .map { row ->
+                row.items.sortedBy { it.boundingBox?.left ?: 0 }
+                    .joinToString(", ") { it.text.trim() }
+            }.joinToString("\n")
 
         return TextTableParser.parse(reconstructedText, defaultBlock)
     }
