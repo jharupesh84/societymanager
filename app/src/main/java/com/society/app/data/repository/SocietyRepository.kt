@@ -1,12 +1,75 @@
 package com.society.app.data.repository
 
+import android.content.Context
 import com.society.app.data.local.SocietyDao
 import com.society.app.data.model.BlockSummary
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.ExpenseEntity
+import com.society.app.data.model.FundCategory
 import kotlinx.coroutines.flow.Flow
+import org.json.JSONArray
+import org.json.JSONObject
 
-class SocietyRepository(private val dao: SocietyDao) {
+class SocietyRepository(
+    private val dao: SocietyDao,
+    private val context: Context? = null
+) {
+
+    private val prefs by lazy {
+        context?.getSharedPreferences("society_categories_prefs", Context.MODE_PRIVATE)
+    }
+
+    // === PERSISTENCE FOR CUSTOM CATEGORIES ===
+
+    fun loadCustomCategories(): List<FundCategory> {
+        val jsonString = prefs?.getString("custom_categories_json", null) ?: return emptyList()
+        return try {
+            val jsonArray = JSONArray(jsonString)
+            val list = mutableListOf<FundCategory>()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                val name = obj.getString("name")
+                val desc = obj.optString("desc", "$name Fund & Celebrations")
+                list.add(
+                    FundCategory(
+                        id = name,
+                        displayName = name,
+                        description = desc,
+                        isMonthly = false,
+                        iconType = "festival"
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveCustomCategories(categories: List<FundCategory>) {
+        val customOnly = categories.filter { cat ->
+            cat.id != FundCategory.CATEGORY_MAINTENANCE && cat.id != FundCategory.CATEGORY_NAVRATRI
+        }
+        val jsonArray = JSONArray()
+        for (cat in customOnly) {
+            val obj = JSONObject().apply {
+                put("name", cat.id)
+                put("desc", cat.description)
+            }
+            jsonArray.put(obj)
+        }
+        prefs?.edit()?.putString("custom_categories_json", jsonArray.toString())?.apply()
+    }
+
+    suspend fun updateCategoryName(oldCategory: String, newCategory: String) {
+        dao.updateCollectionCategory(oldCategory, newCategory)
+        dao.updateExpenseCategory(oldCategory, newCategory)
+    }
+
+    suspend fun deleteCategoryData(category: String) {
+        dao.deleteCollectionsByCategory(category)
+        dao.deleteExpensesByCategory(category)
+    }
 
     // === COLLECTIONS ===
 

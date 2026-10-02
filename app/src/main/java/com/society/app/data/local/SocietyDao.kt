@@ -141,4 +141,18 @@ interface SocietyDao {
 
     @Query("SELECT DISTINCT category FROM collections UNION SELECT DISTINCT category FROM expenses")
     fun getAllRecordedCategories(): Flow<List<String>>
+
+    // === CATEGORY MANAGEMENT (Rename & Delete) ===
+
+    @Query("UPDATE collections SET category = :newCategory WHERE category = :oldCategory")
+    suspend fun updateCollectionCategory(oldCategory: String, newCategory: String)
+
+    @Query("UPDATE expenses SET category = :newCategory WHERE category = :oldCategory")
+    suspend fun updateExpenseCategory(oldCategory: String, newCategory: String)
+
+    @Query("DELETE FROM collections WHERE category = :category")
+    suspend fun deleteCollectionsByCategory(category: String)
+
+    @Query("DELETE FROM expenses WHERE category = :category")
+    suspend fun deleteExpensesByCategory(category: String)
 }

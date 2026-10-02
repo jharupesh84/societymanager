@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalCoroutinesApi::class)
 class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() {
 
-    // Currently selected category (e.g. "Monthly Maintenance", "Navratri Festival", "Ganpati Festival")
+    // Currently selected category (e.g. "Monthly Maintenance", "Navratri Collection", etc.)
     private val _selectedCategory = MutableStateFlow(FundCategory.CATEGORY_MAINTENANCE)
     val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
 
@@ -34,8 +34,8 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     private val _selectedMonth = MutableStateFlow<String?>(null)
     val selectedMonth: StateFlow<String?> = _selectedMonth.asStateFlow()
 
-    // List of available categories (Default + custom added by society)
-    private val _categories = MutableStateFlow(FundCategory.DEFAULT_CATEGORIES)
+    // List of available categories (Default + persistent custom categories added by user)
+    private val _categories = MutableStateFlow(FundCategory.DEFAULT_CATEGORIES + repository.loadCustomCategories())
     val categories: StateFlow<List<FundCategory>> = _categories.asStateFlow()
 
     fun selectCategory(category: String) {
@@ -55,13 +55,59 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
             val newCat = FundCategory(
                 id = trimmed,
                 displayName = trimmed,
-                description = if (description.isNotBlank()) description else "$trimmed Fund & Celebrations",
+                description = if (description.isNotBlank()) description.trim() else "$trimmed Fund & Celebrations",
                 isMonthly = false,
                 iconType = "festival"
             )
-            _categories.value = _categories.value + newCat
+            val updated = _categories.value + newCat
+            _categories.value = updated
+            repository.saveCustomCategories(updated)
         }
         _selectedCategory.value = trimmed
+    }
+
+    fun editCustomCategory(oldName: String, newName: String, newDescription: String = "") {
+        val trimmedNew = newName.trim()
+        if (trimmedNew.isBlank()) return
+        val currentList = _categories.value.toMutableList()
+        val index = currentList.indexOfFirst { it.id.equals(oldName, ignoreCase = true) }
+        if (index != -1) {
+            val existing = currentList[index]
+            val updatedCat = existing.copy(
+                id = trimmedNew,
+                displayName = trimmedNew,
+                description = if (newDescription.isNotBlank()) newDescription.trim() else existing.description
+            )
+            currentList[index] = updatedCat
+            _categories.value = currentList
+            repository.saveCustomCategories(currentList)
+
+            // Update database records asynchronously so existing collections & expenses match the new name
+            viewModelScope.launch {
+                repository.updateCategoryName(oldName, trimmedNew)
+            }
+
+            // If this was the active category, update selectedCategory
+            if (_selectedCategory.value.equals(oldName, ignoreCase = true)) {
+                _selectedCategory.value = trimmedNew
+            }
+        }
+    }
+
+    fun deleteCustomCategory(name: String) {
+        val currentList = _categories.value.filterNot { it.id.equals(name, ignoreCase = true) }
+        _categories.value = currentList
+        repository.saveCustomCategories(currentList)
+
+        // Delete associated records from database
+        viewModelScope.launch {
+            repository.deleteCategoryData(name)
+        }
+
+        // If the deleted category was active, revert to Monthly Maintenance
+        if (_selectedCategory.value.equals(name, ignoreCase = true)) {
+            _selectedCategory.value = FundCategory.CATEGORY_MAINTENANCE
+        }
     }
 
     // Reactive streams scoped to selectedCategory and selectedMonth

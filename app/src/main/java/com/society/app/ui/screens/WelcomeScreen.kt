@@ -13,6 +13,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Celebration
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Festival
 import androidx.compose.material3.*
@@ -42,6 +44,14 @@ fun WelcomeScreen(
     var newCategoryName by remember { mutableStateOf("") }
     var newCategoryDesc by remember { mutableStateOf("") }
 
+    // State for Editing an Added Event
+    var categoryToEdit by remember { mutableStateOf<FundCategory?>(null) }
+    var editCategoryName by remember { mutableStateOf("") }
+    var editCategoryDesc by remember { mutableStateOf("") }
+
+    // State for Deleting an Added Event
+    var categoryToDelete by remember { mutableStateOf<FundCategory?>(null) }
+
     val headerGradient = Brush.verticalGradient(
         colors = listOf(
             Color(0xFF0D47A1), // Royal Navy Blue
@@ -50,6 +60,7 @@ fun WelcomeScreen(
         )
     )
 
+    // Dialog: Add New Event
     if (showAddCategoryDialog) {
         AlertDialog(
             onDismissRequest = { showAddCategoryDialog = false },
@@ -95,6 +106,90 @@ fun WelcomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAddCategoryDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Dialog: Edit Event Name
+    categoryToEdit?.let { targetCat ->
+        AlertDialog(
+            onDismissRequest = { categoryToEdit = null },
+            title = { Text("Edit Event Name", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Update the name or description of this event. Existing collection and expense records will be renamed automatically:",
+                        fontSize = 13.sp,
+                        color = Color(0xFF64748B)
+                    )
+                    OutlinedTextField(
+                        value = editCategoryName,
+                        onValueChange = { editCategoryName = it },
+                        label = { Text("Event Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editCategoryDesc,
+                        onValueChange = { editCategoryDesc = it },
+                        label = { Text("Short Description (Optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editCategoryName.isNotBlank()) {
+                            viewModel.editCustomCategory(
+                                oldName = targetCat.id,
+                                newName = editCategoryName,
+                                newDescription = editCategoryDesc
+                            )
+                            categoryToEdit = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                ) {
+                    Text("Save Changes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { categoryToEdit = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Dialog: Delete Event Confirmation
+    categoryToDelete?.let { targetCat ->
+        AlertDialog(
+            onDismissRequest = { categoryToDelete = null },
+            title = { Text("Delete '${targetCat.displayName}'?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "Are you sure you want to delete this event? All collections and expenses recorded under '${targetCat.displayName}' will also be permanently removed.",
+                    fontSize = 14.sp,
+                    color = Color(0xFF334155)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteCustomCategory(targetCat.id)
+                        categoryToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("Delete Event")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { categoryToDelete = null }) {
                     Text("Cancel")
                 }
             }
@@ -199,6 +294,9 @@ fun WelcomeScreen(
             // Cards for Each Option (Monthly Maintenance, Navratri Collection, plus any custom added)
             categories.forEach { categoryItem ->
                 val isSelected = categoryItem.id == selectedCategory
+                val isCustomEvent = categoryItem.id != FundCategory.CATEGORY_MAINTENANCE &&
+                        categoryItem.id != FundCategory.CATEGORY_NAVRATRI
+
                 val icon: ImageVector = when (categoryItem.iconType) {
                     "apartment" -> Icons.Default.Apartment
                     "navratri" -> Icons.Default.Festival
@@ -271,6 +369,41 @@ fun WelcomeScreen(
                                     color = Color(0xFF64748B),
                                     lineHeight = 16.sp
                                 )
+                            }
+
+                            // Edit & Delete actions for Added Events
+                            if (isCustomEvent) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = {
+                                            categoryToEdit = categoryItem
+                                            editCategoryName = categoryItem.displayName
+                                            editCategoryDesc = categoryItem.description
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Edit Event Name",
+                                            tint = Color(0xFF0284C7),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            categoryToDelete = categoryItem
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete Event",
+                                            tint = Color(0xFFDC2626),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
 
