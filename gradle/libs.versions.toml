@@ -9,6 +9,7 @@ room = "2.6.1"
 ksp = "2.0.0-1.0.24"
 navigationCompose = "2.7.7"
 materialIconsExtended = "1.6.8"
+playServicesMlkitTextRecognition = "19.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -23,6 +24,9 @@ androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "materialIconsExtended" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+
+# Google ML Kit On-Device Text Recognition (100% Offline)
+mlkit-text-recognition = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition", version.ref = "playServicesMlkitTextRecognition" }
 
 # Room SQLite Database
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

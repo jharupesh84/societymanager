@@ -1,6 +1,7 @@
 package com.society.app.ui.viewmodel
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -11,6 +12,10 @@ import com.society.app.data.model.FundCategory
 import com.society.app.data.repository.SocietyRepository
 import com.society.app.util.CsvExporter
 import com.society.app.util.DateUtil
+import com.society.app.util.GeminiVisionService
+import com.society.app.util.MlKitOcrService
+import com.society.app.util.ParsedCollectionRow
+import com.society.app.util.ParsedExpenseRow
 import com.society.app.util.PdfExporter
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +31,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalCoroutinesApi::class)
 class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() {
 
-    // Currently selected category (e.g. "Monthly Maintenance", "Navratri Festival", "Ganpati Festival")
+    // Currently selected category (e.g. "Monthly Maintenance", "Navratri Collection", etc.)
     private val _selectedCategory = MutableStateFlow(FundCategory.CATEGORY_MAINTENANCE)
     val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
 
@@ -34,8 +39,8 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     private val _selectedMonth = MutableStateFlow<String?>(null)
     val selectedMonth: StateFlow<String?> = _selectedMonth.asStateFlow()
 
-    // List of available categories (Default + custom added by society)
-    private val _categories = MutableStateFlow(FundCategory.DEFAULT_CATEGORIES)
+    // List of available categories (Default + persistent custom categories added by user)
+    private val _categories = MutableStateFlow(FundCategory.DEFAULT_CATEGORIES + repository.loadCustomCategories())
     val categories: StateFlow<List<FundCategory>> = _categories.asStateFlow()
 
     fun selectCategory(category: String) {
@@ -55,13 +60,59 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
             val newCat = FundCategory(
                 id = trimmed,
                 displayName = trimmed,
-                description = if (description.isNotBlank()) description else "$trimmed Fund & Celebrations",
+                description = if (description.isNotBlank()) description.trim() else "$trimmed Fund & Celebrations",
                 isMonthly = false,
                 iconType = "festival"
             )
-            _categories.value = _categories.value + newCat
+            val updated = _categories.value + newCat
+            _categories.value = updated
+            repository.saveCustomCategories(updated)
         }
         _selectedCategory.value = trimmed
+    }
+
+    fun editCustomCategory(oldName: String, newName: String, newDescription: String = "") {
+        val trimmedNew = newName.trim()
+        if (trimmedNew.isBlank()) return
+        val currentList = _categories.value.toMutableList()
+        val index = currentList.indexOfFirst { it.id.equals(oldName, ignoreCase = true) }
+        if (index != -1) {
+            val existing = currentList[index]
+            val updatedCat = existing.copy(
+                id = trimmedNew,
+                displayName = trimmedNew,
+                description = if (newDescription.isNotBlank()) newDescription.trim() else existing.description
+            )
+            currentList[index] = updatedCat
+            _categories.value = currentList
+            repository.saveCustomCategories(currentList)
+
+            // Update database records asynchronously so existing collections & expenses match the new name
+            viewModelScope.launch {
+                repository.updateCategoryName(oldName, trimmedNew)
+            }
+
+            // If this was the active category, update selectedCategory
+            if (_selectedCategory.value.equals(oldName, ignoreCase = true)) {
+                _selectedCategory.value = trimmedNew
+            }
+        }
+    }
+
+    fun deleteCustomCategory(name: String) {
+        val currentList = _categories.value.filterNot { it.id.equals(name, ignoreCase = true) }
+        _categories.value = currentList
+        repository.saveCustomCategories(currentList)
+
+        // Delete associated records from database
+        viewModelScope.launch {
+            repository.deleteCategoryData(name)
+        }
+
+        // If the deleted category was active, revert to Monthly Maintenance
+        if (_selectedCategory.value.equals(name, ignoreCase = true)) {
+            _selectedCategory.value = FundCategory.CATEGORY_MAINTENANCE
+        }
     }
 
     // Reactive streams scoped to selectedCategory and selectedMonth
@@ -160,6 +211,16 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         return Pair("General", trimmed)
     }
 
+    fun normalizeFlatKey(block: String, flatNo: String): String {
+        val cleanBlock = block.trim().uppercase()
+        val cleanFlat = flatNo.trim().uppercase().replace(" ", "").replace("-", "")
+        return if (cleanBlock.isNotBlank() && !cleanFlat.startsWith(cleanBlock)) {
+            "$cleanBlock$cleanFlat"
+        } else {
+            cleanFlat
+        }
+    }
+
     fun addCollectionFromCombinedInput(
         rawFlatInput: String,
         ownerName: String,
@@ -172,6 +233,31 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
         viewModelScope.launch {
             val currentDate = DateUtil.getCurrentDate()
             val finalMonth = if (monthYear.isNotBlank()) monthYear else DateUtil.getCurrentMonthYear()
+            val targetKey = normalizeFlatKey(block, flatNo)
+
+            val existingList = repository.getExistingCollections(category, finalMonth)
+            val existing = existingList.find { normalizeFlatKey(it.block, it.flatNo) == targetKey }
+
+            if (existing != null) {
+                if (kotlin.math.abs(existing.amount - amount) < 0.01) {
+                    // Same amount -> Ignore duplicate
+                    _statusMessage.value = "Duplicate ignored: Flat $flatNo already has ₹$amount recorded for $finalMonth."
+                    return@launch
+                } else {
+                    // Different amount -> Update existing record
+                    val updated = existing.copy(
+                        amount = amount,
+                        ownerName = ownerName.trim().ifBlank { existing.ownerName },
+                        paymentMode = paymentMode,
+                        date = currentDate,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    repository.updateCollection(updated)
+                    _statusMessage.value = "Updated Flat $flatNo amount to ₹$amount for $finalMonth (was ₹${existing.amount})."
+                    return@launch
+                }
+            }
+
             val item = CollectionEntity(
                 category = category,
                 monthYear = finalMonth,
@@ -183,6 +269,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                 date = currentDate
             )
             repository.addCollection(item)
+            _statusMessage.value = "Saved collection for Flat $flatNo (₹$amount)."
         }
     }
 
@@ -215,6 +302,261 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     fun deleteExpense(expense: ExpenseEntity) {
         viewModelScope.launch {
             repository.deleteExpense(expense)
+        }
+    }
+
+    // === AI VISION & OFFLINE ML KIT SCANNING ===
+    enum class ScanEngine {
+        GEMINI_CLOUD,
+        OFFLINE_MLKIT
+    }
+
+    private val _scanEngine = MutableStateFlow(ScanEngine.OFFLINE_MLKIT)
+    val scanEngine: StateFlow<ScanEngine> = _scanEngine.asStateFlow()
+
+    private val _geminiApiKey = MutableStateFlow(repository.getGeminiApiKey())
+    val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
+
+    private val _isAiScanning = MutableStateFlow(false)
+    val isAiScanning: StateFlow<Boolean> = _isAiScanning.asStateFlow()
+
+    private val _aiScanError = MutableStateFlow<String?>(null)
+    val aiScanError: StateFlow<String?> = _aiScanError.asStateFlow()
+
+    private val _scannedCollections = MutableStateFlow<List<ParsedCollectionRow>?>(null)
+    val scannedCollections: StateFlow<List<ParsedCollectionRow>?> = _scannedCollections.asStateFlow()
+
+    private val _scannedExpense = MutableStateFlow<ParsedExpenseRow?>(null)
+    val scannedExpense: StateFlow<ParsedExpenseRow?> = _scannedExpense.asStateFlow()
+
+    private val _statusMessage = MutableStateFlow<String?>(null)
+    val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+
+    fun clearStatusMessage() {
+        _statusMessage.value = null
+    }
+
+    fun setScanEngine(engine: ScanEngine) {
+        _scanEngine.value = engine
+    }
+
+    fun saveGeminiApiKey(key: String) {
+        val trimmed = key.trim()
+        repository.saveGeminiApiKey(trimmed)
+        _geminiApiKey.value = trimmed
+    }
+
+    fun clearAiScanState() {
+        _isAiScanning.value = false
+        _aiScanError.value = null
+        _scannedCollections.value = null
+        _scannedExpense.value = null
+    }
+
+    fun setScannedCollections(rows: List<ParsedCollectionRow>) {
+        _scannedCollections.value = rows
+    }
+
+    fun scanCollectionImage(
+        context: Context,
+        imageUri: Uri,
+        forceEngine: ScanEngine? = null
+    ) {
+        val engine = forceEngine ?: _scanEngine.value
+
+        viewModelScope.launch {
+            _isAiScanning.value = true
+            _aiScanError.value = null
+            _scannedCollections.value = null
+
+            val result = if (engine == ScanEngine.GEMINI_CLOUD) {
+                val cloudResult = GeminiVisionService.extractCollectionsFromImage(
+                    context = context,
+                    imageUri = imageUri,
+                    apiKey = _geminiApiKey.value
+                )
+                if (cloudResult.isFailure) {
+                    val err = cloudResult.exceptionOrNull()?.message.orEmpty().lowercase()
+                    if (err.contains("quota") || err.contains("exceeded") || err.contains("rate") ||
+                        err.contains("limit") || err.contains("429") || err.contains("503") ||
+                        err.contains("connect") || err.contains("timeout") || err.contains("resource")
+                    ) {
+                        // Automatically fall back to local on-device ML Kit OCR
+                        val offlineResult = MlKitOcrService.extractCollectionsFromImage(
+                            context = context,
+                            imageUri = imageUri
+                        )
+                        if (offlineResult.isSuccess) {
+                            _statusMessage.value = "Gemini quota limit reached. Recovered records using On-Device Offline OCR!"
+                            offlineResult
+                        } else {
+                            cloudResult
+                        }
+                    } else {
+                        cloudResult
+                    }
+                } else {
+                    cloudResult
+                }
+            } else {
+                MlKitOcrService.extractCollectionsFromImage(
+                    context = context,
+                    imageUri = imageUri
+                )
+            }
+
+            result.onSuccess { rows ->
+                _scannedCollections.value = rows
+            }.onFailure { err ->
+                _aiScanError.value = err.message ?: "Failed to extract collection records from image."
+            }
+
+            _isAiScanning.value = false
+        }
+    }
+
+    fun scanExpenseImage(context: Context, imageUri: Uri, forceEngine: ScanEngine? = null) {
+        val engine = forceEngine ?: _scanEngine.value
+        viewModelScope.launch {
+            _isAiScanning.value = true
+            _aiScanError.value = null
+            _scannedExpense.value = null
+
+            val result = if (engine == ScanEngine.GEMINI_CLOUD) {
+                val cloudResult = GeminiVisionService.extractExpenseFromImage(
+                    context = context,
+                    imageUri = imageUri,
+                    apiKey = _geminiApiKey.value
+                )
+                if (cloudResult.isFailure) {
+                    val err = cloudResult.exceptionOrNull()?.message.orEmpty().lowercase()
+                    if (err.contains("quota") || err.contains("exceeded") || err.contains("rate") ||
+                        err.contains("limit") || err.contains("429") || err.contains("503") ||
+                        err.contains("connect") || err.contains("timeout") || err.contains("resource")
+                    ) {
+                        val offlineResult = MlKitOcrService.extractExpenseFromImage(
+                            context = context,
+                            imageUri = imageUri
+                        )
+                        if (offlineResult.isSuccess) {
+                            _statusMessage.value = "Gemini quota limit reached. Recovered expense using On-Device Offline OCR!"
+                            offlineResult
+                        } else {
+                            cloudResult
+                        }
+                    } else {
+                        cloudResult
+                    }
+                } else {
+                    cloudResult
+                }
+            } else {
+                MlKitOcrService.extractExpenseFromImage(
+                    context = context,
+                    imageUri = imageUri
+                )
+            }
+
+            result.onSuccess { expense ->
+                _scannedExpense.value = expense
+            }.onFailure { err ->
+                _aiScanError.value = err.message ?: "Failed to extract expense details from bill."
+            }
+
+            _isAiScanning.value = false
+        }
+    }
+
+    fun saveBatchCollections(
+        items: List<ParsedCollectionRow>,
+        targetMonthYear: String,
+        targetCategory: String = _selectedCategory.value
+    ) {
+        viewModelScope.launch {
+            val currentDate = DateUtil.getCurrentDate()
+            val existingList = repository.getExistingCollections(targetCategory, targetMonthYear)
+            val existingMap = existingList.associateBy { normalizeFlatKey(it.block, it.flatNo) }
+
+            var insertedCount = 0
+            var updatedCount = 0
+            var ignoredCount = 0
+
+            val toInsert = mutableListOf<CollectionEntity>()
+            val toUpdate = mutableListOf<CollectionEntity>()
+
+            val processedBatchKeys = mutableMapOf<String, ParsedCollectionRow>()
+
+            for (item in items) {
+                val block = item.block.ifBlank { "General" }
+                val flatNo = item.flatNo
+                val key = normalizeFlatKey(block, flatNo)
+
+                val prevInBatch = processedBatchKeys[key]
+                if (prevInBatch != null && kotlin.math.abs(prevInBatch.amount - item.amount) < 0.01) {
+                    ignoredCount++
+                    continue
+                }
+                processedBatchKeys[key] = item
+
+                val existing = existingMap[key]
+
+                if (existing != null) {
+                    val isSameAmount = kotlin.math.abs(existing.amount - item.amount) < 0.01
+                    val isSameMode = existing.paymentMode.equals(item.paymentMode, ignoreCase = true)
+                    val isSameName = existing.ownerName.equals(item.ownerName, ignoreCase = true)
+
+                    if (isSameAmount && isSameMode && isSameName) {
+                        // Same record -> Ignore duplicate
+                        ignoredCount++
+                    } else {
+                        // Amount, Payment Mode, or Name changed -> Update existing record
+                        toUpdate.add(
+                            existing.copy(
+                                amount = item.amount,
+                                ownerName = item.ownerName.ifBlank { existing.ownerName },
+                                paymentMode = item.paymentMode,
+                                date = currentDate,
+                                timestamp = System.currentTimeMillis()
+                            )
+                        )
+                        updatedCount++
+                    }
+                } else {
+                    // New record -> Insert
+                    toInsert.add(
+                        CollectionEntity(
+                            category = targetCategory,
+                            monthYear = targetMonthYear,
+                            block = block,
+                            flatNo = flatNo,
+                            ownerName = item.ownerName.ifBlank { "Resident" },
+                            amount = item.amount,
+                            paymentMode = item.paymentMode,
+                            date = currentDate
+                        )
+                    )
+                    insertedCount++
+                }
+            }
+
+            if (toInsert.isNotEmpty()) {
+                repository.addCollections(toInsert)
+            }
+            if (toUpdate.isNotEmpty()) {
+                repository.updateCollections(toUpdate)
+            }
+
+            clearAiScanState()
+
+            val msg = buildString {
+                append("Import complete: ")
+                val parts = mutableListOf<String>()
+                if (insertedCount > 0) parts.add("$insertedCount added")
+                if (updatedCount > 0) parts.add("$updatedCount updated")
+                if (ignoredCount > 0) parts.add("$ignoredCount duplicates ignored")
+                if (parts.isEmpty()) append("No records processed.") else append(parts.joinToString(", "))
+            }
+            _statusMessage.value = msg
         }
     }
 

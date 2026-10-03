@@ -4,18 +4,22 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.society.app.data.model.FundCategory
+import com.society.app.ui.dialogs.AiApiKeyDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -28,6 +32,13 @@ fun MainScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     val selectedCategory by viewModel.selectedCategory.collectAsState()
 
+    val isCustomEvent = selectedCategory != FundCategory.CATEGORY_MAINTENANCE &&
+            selectedCategory != FundCategory.CATEGORY_NAVRATRI
+
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editNameInput by remember { mutableStateOf("") }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+
     val headerColor = when (selectedCategory) {
         FundCategory.CATEGORY_MAINTENANCE -> Color(0xFF1565C0) // Royal Blue
         FundCategory.CATEGORY_NAVRATRI -> Color(0xFFC2410C)    // Festive Orange
@@ -35,18 +46,87 @@ fun MainScreen(
         else -> Color(0xFF0F766E)                             // Teal
     }
 
+    if (showApiKeyDialog) {
+        AiApiKeyDialog(
+            viewModel = viewModel,
+            onDismiss = { showApiKeyDialog = false }
+        )
+    }
+
+    if (showEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("Edit Event Name", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Rename this event. Existing collection and expense records will be updated automatically:",
+                        fontSize = 13.sp,
+                        color = Color(0xFF64748B)
+                    )
+                    OutlinedTextField(
+                        value = editNameInput,
+                        onValueChange = { editNameInput = it },
+                        label = { Text("Event Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editNameInput.isNotBlank()) {
+                            viewModel.editCustomCategory(
+                                oldName = selectedCategory,
+                                newName = editNameInput
+                            )
+                            showEditDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                ) {
+                    Text("Save Changes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text(
-                            text = selectedCategory,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 17.sp,
-                            maxLines = 1,
-                            color = Color.White
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = selectedCategory,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                maxLines = 1,
+                                color = Color.White
+                            )
+                            if (isCustomEvent) {
+                                IconButton(
+                                    onClick = {
+                                        editNameInput = selectedCategory
+                                        showEditDialog = true
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Event Name",
+                                        tint = Color.White.copy(alpha = 0.9f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
                         Text(
                             text = "Society Manager Portal",
                             fontSize = 11.sp,
@@ -64,6 +144,14 @@ fun MainScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showApiKeyDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "AI Settings",
+                            tint = Color.White
+                        )
+                    }
+
                     FilledTonalButton(
                         onClick = onBackToWelcome,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -76,7 +164,7 @@ fun MainScreen(
                         Text("Switch Fund", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
 
                     IconButton(onClick = onLogout) {
                         Icon(

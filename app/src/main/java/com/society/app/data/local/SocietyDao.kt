@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.society.app.data.model.BlockSummary
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.ExpenseEntity
@@ -17,6 +18,21 @@ interface SocietyDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCollection(collection: CollectionEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCollections(collections: List<CollectionEntity>): List<Long>
+
+    @Update
+    suspend fun updateCollection(collection: CollectionEntity)
+
+    @Update
+    suspend fun updateCollections(collections: List<CollectionEntity>)
+
+    @Query("SELECT * FROM collections WHERE category = :category AND monthYear = :monthYear")
+    suspend fun getCollectionsByMonthSync(category: String, monthYear: String): List<CollectionEntity>
+
+    @Query("SELECT * FROM collections WHERE category = :category")
+    suspend fun getCollectionsByCategorySync(category: String): List<CollectionEntity>
 
     @Delete
     suspend fun deleteCollection(collection: CollectionEntity)
@@ -141,4 +157,18 @@ interface SocietyDao {
 
     @Query("SELECT DISTINCT category FROM collections UNION SELECT DISTINCT category FROM expenses")
     fun getAllRecordedCategories(): Flow<List<String>>
+
+    // === CATEGORY MANAGEMENT (Rename & Delete) ===
+
+    @Query("UPDATE collections SET category = :newCategory WHERE category = :oldCategory")
+    suspend fun updateCollectionCategory(oldCategory: String, newCategory: String)
+
+    @Query("UPDATE expenses SET category = :newCategory WHERE category = :oldCategory")
+    suspend fun updateExpenseCategory(oldCategory: String, newCategory: String)
+
+    @Query("DELETE FROM collections WHERE category = :category")
+    suspend fun deleteCollectionsByCategory(category: String)
+
+    @Query("DELETE FROM expenses WHERE category = :category")
+    suspend fun deleteExpensesByCategory(category: String)
 }

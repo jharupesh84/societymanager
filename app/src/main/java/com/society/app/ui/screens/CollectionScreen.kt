@@ -1,5 +1,9 @@
 package com.society.app.ui.screens
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -7,16 +11,22 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -24,14 +34,34 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.FundCategory
+import com.society.app.ui.dialogs.AiApiKeyDialog
+import com.society.app.ui.dialogs.BatchCollectionReviewDialog
+import com.society.app.ui.dialogs.PasteTextTableDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 import com.society.app.util.DateUtil
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CollectionScreen(viewModel: SocietyViewModel) {
+    val context = LocalContext.current
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val collections by viewModel.collections.collectAsState()
+    val geminiApiKey by viewModel.geminiApiKey.collectAsState()
+    val isAiScanning by viewModel.isAiScanning.collectAsState()
+    val aiScanError by viewModel.aiScanError.collectAsState()
+    val scannedCollections by viewModel.scannedCollections.collectAsState()
+    val scanEngine by viewModel.scanEngine.collectAsState()
+    val statusMessage by viewModel.statusMessage.collectAsState()
+
+    LaunchedEffect(statusMessage) {
+        statusMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.clearStatusMessage()
+        }
+    }
+
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+    var showPasteDialog by remember { mutableStateOf(false) }
 
     var flatInput by remember { mutableStateOf("") }
     var ownerName by remember { mutableStateOf("") }
@@ -44,9 +74,122 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     val monthOptions = remember { DateUtil.getMonthYearList() }
     val isMonthlyMaintenance = selectedCategory == FundCategory.CATEGORY_MAINTENANCE
 
+    // Photo picker launcher for AI table scanning
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.scanCollectionImage(context, uri)
+        }
+    }
+
     // Live preview of parsed block and flat
     val parsedPreview = remember(flatInput) {
         if (flatInput.isNotBlank()) viewModel.parseBlockAndFlat(flatInput) else null
+    }
+
+    // API Key Dialog
+    if (showApiKeyDialog) {
+        AiApiKeyDialog(
+            viewModel = viewModel,
+            onDismiss = { showApiKeyDialog = false }
+        )
+    }
+
+    // Paste Text Table Dialog (Offline Alternative)
+    if (showPasteDialog) {
+        PasteTextTableDialog(
+            onDismiss = { showPasteDialog = false },
+            onParsed = { rows ->
+                showPasteDialog = false
+                viewModel.setScannedCollections(rows)
+            }
+        )
+    }
+
+    // AI Scanning Progress Dialog
+    if (isAiScanning) {
+        AlertDialog(
+            onDismissRequest = { /* Prevent dismissing while running */ },
+            title = {
+                val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.5.dp,
+                        color = if (isCloud) Color(0xFF1565C0) else Color(0xFF16A34A)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = if (isCloud) "Gemini Cloud AI Scanning" else "On-Device Offline OCR",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+                }
+            },
+            text = {
+                val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = if (isCloud)
+                            "Gemini Vision AI is analyzing the image and reading table data..."
+                        else
+                            "Google ML Kit is reading the image directly on your device (100% offline)...",
+                        fontSize = 14.sp,
+                        color = Color(0xFF334155)
+                    )
+                    Text(
+                        text = "Detecting blocks, flats, resident names, amounts, and payment modes.",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // Scan Error Dialog
+    aiScanError?.let { errText ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearAiScanState() },
+            title = { Text("Scan Result", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)) },
+            text = { Text(errText, fontSize = 14.sp) },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD) {
+                        Button(
+                            onClick = {
+                                viewModel.clearAiScanState()
+                                showApiKeyDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                        ) {
+                            Text("Check Key")
+                        }
+                    }
+                    TextButton(onClick = { viewModel.clearAiScanState() }) {
+                        Text("Dismiss")
+                    }
+                }
+            }
+        )
+    }
+
+    // Batch Collection Review Dialog
+    scannedCollections?.let { rows ->
+        BatchCollectionReviewDialog(
+            initialRows = rows,
+            selectedCategory = selectedCategory,
+            onDismiss = { viewModel.clearAiScanState() },
+            onConfirmImport = { verifiedRows, targetMonth ->
+                viewModel.saveBatchCollections(
+                    items = verifiedRows,
+                    targetMonthYear = if (isMonthlyMaintenance) targetMonth else DateUtil.getCurrentMonthYear(),
+                    targetCategory = selectedCategory
+                )
+            }
+        )
     }
 
     LazyColumn(
@@ -103,7 +246,150 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
             }
         }
 
-        // Form Card
+        // Batch Import Card (Supports both Gemini Cloud AI and Offline On-Device OCR)
+        item {
+            val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isCloud) Color(0xFFF0FDF4) else Color(0xFFF0F9FF)
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (isCloud) Icons.Default.AutoAwesome else Icons.Default.TableChart,
+                                contentDescription = null,
+                                tint = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Batch Import from Image / Table",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = if (isCloud) Color(0xFF14532D) else Color(0xFF075985)
+                            )
+                        }
+
+                        if (isCloud) {
+                            IconButton(
+                                onClick = { showApiKeyDialog = true },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Key,
+                                    contentDescription = "AI Settings",
+                                    tint = Color(0xFF16A34A),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Engine Selection FilterChips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = isCloud,
+                            onClick = { viewModel.setScanEngine(SocietyViewModel.ScanEngine.GEMINI_CLOUD) },
+                            label = {
+                                Text(
+                                    text = "✨ Gemini Cloud AI",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isCloud) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = !isCloud,
+                            onClick = { viewModel.setScanEngine(SocietyViewModel.ScanEngine.OFFLINE_MLKIT) },
+                            label = {
+                                Text(
+                                    text = "📱 Offline On-Device",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (!isCloud) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    // Primary Action: Upload & Scan Image
+                    Button(
+                        onClick = {
+                            if (isCloud && geminiApiKey.isBlank()) {
+                                showApiKeyDialog = true
+                            } else {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TableChart,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isCloud) "📷 Upload Image to Scan (Gemini AI)" else "📷 Upload Image to Scan (Offline OCR)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    // Alternative: Paste WhatsApp / Text Table (Offline & Instant)
+                    OutlinedButton(
+                        onClick = { showPasteDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentPaste,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = Color(0xFF475569)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "📋 Paste WhatsApp / Text Table (Offline)",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = Color(0xFF475569)
+                        )
+                    }
+
+                }
+            }
+        }
+
+        // Manual Entry Form Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -113,8 +399,8 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
                     Text(
-                        text = if (isMonthlyMaintenance) "Enter Monthly Maintenance" else "Enter $selectedCategory Collection",
-                        fontSize = 17.sp,
+                        text = if (isMonthlyMaintenance) "Enter Single Maintenance Record" else "Enter Single $selectedCategory Record",
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1565C0)
                     )
@@ -360,9 +646,15 @@ fun CollectionItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val flatBadge = when {
+                        collection.flatNo.startsWith("${collection.block}-", ignoreCase = true) -> collection.flatNo
+                        collection.flatNo.startsWith(collection.block, ignoreCase = true) && collection.flatNo.length > collection.block.length -> collection.flatNo
+                        collection.block.isNotBlank() && collection.block != "General" -> "${collection.block}-${collection.flatNo}"
+                        else -> collection.flatNo
+                    }
                     SuggestionChip(
                         onClick = {},
-                        label = { Text("Block ${collection.block} - ${collection.flatNo}", fontWeight = FontWeight.SemiBold) },
+                        label = { Text(flatBadge, fontWeight = FontWeight.SemiBold) },
                         shape = RoundedCornerShape(8.dp)
                     )
                     SuggestionChip(

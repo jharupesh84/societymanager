@@ -367,70 +367,38 @@ fun ReportScreen(viewModel: SocietyViewModel) {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Action Buttons: PDF and CSV
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // Action Button: Export PDF Report
+                    Button(
+                        onClick = {
+                            when {
+                                selectedReport == wholeSocietyOption -> {
+                                    viewModel.exportCollectionsPdf(context, blockFilter = null)
+                                }
+                                selectedReport.startsWith("Collections: Block ") -> {
+                                    val blockName = selectedReport.removePrefix("Collections: Block ").trim()
+                                    viewModel.exportCollectionsPdf(context, blockFilter = blockName)
+                                }
+                                selectedReport.startsWith("Expenses:") -> {
+                                    viewModel.exportExpensesPdf(context)
+                                }
+                                selectedReport.startsWith("Consolidated:") -> {
+                                    viewModel.exportConsolidatedSummaryPdf(context)
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                when {
-                                    selectedReport == wholeSocietyOption -> {
-                                        viewModel.exportCollectionsPdf(context, blockFilter = null)
-                                    }
-                                    selectedReport.startsWith("Collections: Block ") -> {
-                                        val blockName = selectedReport.removePrefix("Collections: Block ").trim()
-                                        viewModel.exportCollectionsPdf(context, blockFilter = blockName)
-                                    }
-                                    selectedReport.startsWith("Expenses:") -> {
-                                        viewModel.exportExpensesPdf(context)
-                                    }
-                                    selectedReport.startsWith("Consolidated:") -> {
-                                        viewModel.exportConsolidatedSummaryPdf(context)
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "PDF Report",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                when {
-                                    selectedReport.startsWith("Collections: Block ") -> {
-                                        val blockName = selectedReport.removePrefix("Collections: Block ").trim()
-                                        viewModel.exportBlockCsv(context, blockName)
-                                    }
-                                    else -> {
-                                        viewModel.exportConsolidatedCsv(context)
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1565C0))
-                        ) {
-                            Icon(imageVector = Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Export CSV",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Icon(imageVector = Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Export & Open PDF Report",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }

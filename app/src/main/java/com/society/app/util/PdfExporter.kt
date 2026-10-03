@@ -57,14 +57,22 @@ object PdfExporter {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val displayDate = SimpleDateFormat("dd-MMM-yyyy HH:mm", Locale.getDefault()).format(Date())
 
-        val sanitizedCategory = category.replace(" ", "_")
-        val sanitizedMonth = monthFilter?.replace(" ", "_") ?: "AllMonths"
-        val sanitizedBlock = if (blockFilter != null) "Block_${blockFilter}" else "AllBlocks"
-        val fileName = "${sanitizedCategory}_Collection_${sanitizedMonth}_${sanitizedBlock}_$timestamp.pdf"
+        val isNavratri = category.contains("navratri", ignoreCase = true) || category.contains("navaratri", ignoreCase = true)
+        val isMonthly = category.contains("maintenance", ignoreCase = true) || category.contains("monthly", ignoreCase = true)
 
-        val titleText = "$category Collection Report"
+        val reportHeading = when {
+            isNavratri -> "Arya Krishna Society Navaratri Collection Report"
+            isMonthly -> "Arya Krishna Society Monthly Collection Report"
+            else -> "Arya Krishna Society $category Collection Report"
+        }
+
+        val sanitizedHeading = reportHeading.replace(" ", "_")
+        val sanitizedMonth = if (isNavratri) "" else (monthFilter?.let { "_${it.replace(" ", "_")}" } ?: "_AllMonths")
+        val sanitizedBlock = if (blockFilter != null) "_Block_${blockFilter}" else "_AllBlocks"
+        val fileName = "${sanitizedHeading}${sanitizedMonth}${sanitizedBlock}_$timestamp.pdf"
+
         val scopeText = buildString {
-            if (monthFilter != null) append("Month: $monthFilter | ")
+            if (!isNavratri && monthFilter != null) append("Month: $monthFilter | ")
             if (blockFilter != null) append("Block: $blockFilter | ") else append("All Blocks | ")
             append("Total Records: ${collections.size}")
         }
@@ -72,11 +80,6 @@ object PdfExporter {
         val titlePaint = Paint().apply {
             color = Color.rgb(27, 94, 32)
             textSize = 15f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        }
-        val categoryPaint = Paint().apply {
-            color = Color.rgb(21, 101, 192)
-            textSize = 11f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val subtitlePaint = Paint().apply {
@@ -100,38 +103,51 @@ object PdfExporter {
             color = Color.rgb(232, 245, 233)
         }
 
+        // Column X coordinates
+        // Navratri (4 columns: Flat No, Resident Name, Mode, Amount)
+        val colNavratriFlat = MARGIN
+        val colNavratriOwner = MARGIN + 85f
+        val colNavratriMode = MARGIN + 355f
+        val colNavratriAmount = MARGIN + 445f
+
+        // Monthly (6 columns: Flat No, Resident Name, Period/Month, Mode, Amount, Date)
+        val colMonthlyFlat = MARGIN
+        val colMonthlyOwner = MARGIN + 70f
+        val colMonthlyMonth = MARGIN + 230f
+        val colMonthlyMode = MARGIN + 320f
+        val colMonthlyAmount = MARGIN + 395f
+        val colMonthlyDate = MARGIN + 465f
+
         var pageNumber = 1
         var pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
         var page = document.startPage(pageInfo)
         var canvas = page.canvas
 
-        fun drawHeader(c: Canvas) {
-            c.drawText("SOCIETY RESIDENTS WELFARE ASSOCIATION", MARGIN, 42f, titlePaint)
-            c.drawText(titleText, MARGIN, 58f, categoryPaint)
-            c.drawText("$scopeText  |  Generated: $displayDate", MARGIN, 73f, subtitlePaint)
-            c.drawLine(MARGIN, 82f, PAGE_WIDTH - MARGIN, 82f, linePaint)
+        fun drawHeaderAndTableHeader(c: Canvas) {
+            c.drawText(reportHeading, MARGIN, 46f, titlePaint)
+            c.drawText("$scopeText  |  Generated: $displayDate", MARGIN, 64f, subtitlePaint)
+            c.drawLine(MARGIN, 74f, PAGE_WIDTH - MARGIN, 74f, linePaint)
+
+            val headerY = 96f
+            c.drawRect(MARGIN, headerY - 12f, PAGE_WIDTH - MARGIN, headerY + 6f, headerBgPaint)
+            if (isNavratri) {
+                c.drawText("Flat No", colNavratriFlat, headerY, headerPaint)
+                c.drawText("Resident Name", colNavratriOwner, headerY, headerPaint)
+                c.drawText("Mode", colNavratriMode, headerY, headerPaint)
+                c.drawText("Amount (₹)", colNavratriAmount, headerY, headerPaint)
+            } else {
+                c.drawText("Flat No", colMonthlyFlat, headerY, headerPaint)
+                c.drawText("Resident Name", colMonthlyOwner, headerY, headerPaint)
+                c.drawText("Period/Month", colMonthlyMonth, headerY, headerPaint)
+                c.drawText("Mode", colMonthlyMode, headerY, headerPaint)
+                c.drawText("Amount (₹)", colMonthlyAmount, headerY, headerPaint)
+                c.drawText("Date", colMonthlyDate, headerY, headerPaint)
+            }
         }
 
-        drawHeader(canvas)
+        drawHeaderAndTableHeader(canvas)
 
-        var y = 102f
-        val colFlat = MARGIN
-        val colOwner = MARGIN + 70f
-        val colMonth = MARGIN + 230f
-        val colMode = MARGIN + 320f
-        val colAmount = MARGIN + 395f
-        val colDate = MARGIN + 465f
-
-        // Table Header
-        canvas.drawRect(MARGIN, y - 12f, PAGE_WIDTH - MARGIN, y + 6f, headerBgPaint)
-        canvas.drawText("Flat No", colFlat, y, headerPaint)
-        canvas.drawText("Resident Name", colOwner, y, headerPaint)
-        canvas.drawText("Period/Month", colMonth, y, headerPaint)
-        canvas.drawText("Mode", colMode, y, headerPaint)
-        canvas.drawText("Amount (₹)", colAmount, y, headerPaint)
-        canvas.drawText("Date", colDate, y, headerPaint)
-        y += 18f
-
+        var y = 114f
         var totalAmount = 0.0
         var totalCash = 0.0
         var totalOnline = 0.0
@@ -143,19 +159,33 @@ object PdfExporter {
                 pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
                 page = document.startPage(pageInfo)
                 canvas = page.canvas
-                drawHeader(canvas)
-                y = 102f
+                drawHeaderAndTableHeader(canvas)
+                y = 114f
             }
 
             totalAmount += item.amount
             if (item.paymentMode.equals("Cash", ignoreCase = true)) totalCash += item.amount else totalOnline += item.amount
 
-            canvas.drawText("${item.block}-${item.flatNo}", colFlat, y, rowPaint)
-            canvas.drawText(item.ownerName.take(24), colOwner, y, rowPaint)
-            canvas.drawText(if (item.monthYear.isNotBlank()) item.monthYear.take(14) else "-", colMonth, y, rowPaint)
-            canvas.drawText(item.paymentMode, colMode, y, rowPaint)
-            canvas.drawText("₹%.2f".format(item.amount), colAmount, y, rowPaint)
-            canvas.drawText(item.date, colDate, y, rowPaint)
+            val displayFlat = when {
+                item.flatNo.startsWith("${item.block}-", ignoreCase = true) -> item.flatNo
+                item.flatNo.startsWith(item.block, ignoreCase = true) && item.flatNo.length > item.block.length -> item.flatNo
+                item.block.isNotBlank() && item.block != "General" -> "${item.block}-${item.flatNo}"
+                else -> item.flatNo
+            }
+
+            if (isNavratri) {
+                canvas.drawText(displayFlat, colNavratriFlat, y, rowPaint)
+                canvas.drawText(item.ownerName.take(38), colNavratriOwner, y, rowPaint)
+                canvas.drawText(item.paymentMode, colNavratriMode, y, rowPaint)
+                canvas.drawText("₹%.2f".format(item.amount), colNavratriAmount, y, rowPaint)
+            } else {
+                canvas.drawText(displayFlat, colMonthlyFlat, y, rowPaint)
+                canvas.drawText(item.ownerName.take(24), colMonthlyOwner, y, rowPaint)
+                canvas.drawText(if (item.monthYear.isNotBlank()) item.monthYear.take(14) else "-", colMonthlyMonth, y, rowPaint)
+                canvas.drawText(item.paymentMode, colMonthlyMode, y, rowPaint)
+                canvas.drawText("₹%.2f".format(item.amount), colMonthlyAmount, y, rowPaint)
+                canvas.drawText(item.date, colMonthlyDate, y, rowPaint)
+            }
             canvas.drawLine(MARGIN, y + 4f, PAGE_WIDTH - MARGIN, y + 4f, linePaint)
             y += 16f
         }
@@ -168,8 +198,8 @@ object PdfExporter {
             pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
             page = document.startPage(pageInfo)
             canvas = page.canvas
-            drawHeader(canvas)
-            y = 102f
+            drawHeaderAndTableHeader(canvas)
+            y = 114f
         }
 
         canvas.drawRect(MARGIN, y - 10f, PAGE_WIDTH - MARGIN, y + 36f, headerBgPaint)
@@ -178,7 +208,7 @@ object PdfExporter {
 
         document.finishPage(page)
 
-        return saveAndOpenFile(context, document, fileName, titleText)
+        return saveAndOpenFile(context, document, fileName, reportHeading)
     }
 
     /**
@@ -194,24 +224,27 @@ object PdfExporter {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val displayDate = SimpleDateFormat("dd-MMM-yyyy HH:mm", Locale.getDefault()).format(Date())
 
-        val sanitizedCategory = category.replace(" ", "_")
-        val sanitizedMonth = monthFilter?.replace(" ", "_") ?: "AllMonths"
-        val fileName = "${sanitizedCategory}_Expenses_${sanitizedMonth}_$timestamp.pdf"
+        val isNavratri = category.contains("navratri", ignoreCase = true) || category.contains("navaratri", ignoreCase = true)
+        val isMonthly = category.contains("maintenance", ignoreCase = true) || category.contains("monthly", ignoreCase = true)
 
-        val titleText = "$category Expense Report"
+        val reportHeading = when {
+            isNavratri -> "Arya Krishna Society Navaratri Expense Report"
+            isMonthly -> "Arya Krishna Society Monthly Expense Report"
+            else -> "Arya Krishna Society $category Expense Report"
+        }
+
+        val sanitizedHeading = reportHeading.replace(" ", "_")
+        val sanitizedMonth = if (isNavratri) "" else (monthFilter?.let { "_${it.replace(" ", "_")}" } ?: "_AllMonths")
+        val fileName = "${sanitizedHeading}${sanitizedMonth}_$timestamp.pdf"
+
         val scopeText = buildString {
-            if (monthFilter != null) append("Month: $monthFilter | ")
+            if (!isNavratri && monthFilter != null) append("Month: $monthFilter | ")
             append("Total Entries: ${expenses.size}")
         }
 
         val titlePaint = Paint().apply {
             color = Color.rgb(198, 40, 40)
             textSize = 15f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        }
-        val categoryPaint = Paint().apply {
-            color = Color.rgb(21, 101, 192)
-            textSize = 11f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val subtitlePaint = Paint().apply {
@@ -235,36 +268,48 @@ object PdfExporter {
             color = Color.rgb(255, 235, 238)
         }
 
+        // Navratri (4 columns: #, Expense Detail, Amount, Date)
+        val colNavratriSr = MARGIN
+        val colNavratriDetail = MARGIN + 35f
+        val colNavratriAmount = MARGIN + 395f
+        val colNavratriDate = MARGIN + 465f
+
+        // Monthly (5 columns: #, Expense Detail, Period, Amount, Date)
+        val colMonthlySr = MARGIN
+        val colMonthlyDetail = MARGIN + 35f
+        val colMonthlyPeriod = MARGIN + 320f
+        val colMonthlyAmount = MARGIN + 410f
+        val colMonthlyDate = MARGIN + 480f
+
         var pageNumber = 1
         var pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
         var page = document.startPage(pageInfo)
         var canvas = page.canvas
 
-        fun drawHeader(c: Canvas) {
-            c.drawText("SOCIETY RESIDENTS WELFARE ASSOCIATION", MARGIN, 42f, titlePaint)
-            c.drawText(titleText, MARGIN, 58f, categoryPaint)
-            c.drawText("$scopeText  |  Generated: $displayDate", MARGIN, 73f, subtitlePaint)
-            c.drawLine(MARGIN, 82f, PAGE_WIDTH - MARGIN, 82f, linePaint)
+        fun drawHeaderAndTableHeader(c: Canvas) {
+            c.drawText(reportHeading, MARGIN, 46f, titlePaint)
+            c.drawText("$scopeText  |  Generated: $displayDate", MARGIN, 64f, subtitlePaint)
+            c.drawLine(MARGIN, 74f, PAGE_WIDTH - MARGIN, 74f, linePaint)
+
+            val headerY = 96f
+            c.drawRect(MARGIN, headerY - 12f, PAGE_WIDTH - MARGIN, headerY + 6f, headerBgPaint)
+            if (isNavratri) {
+                c.drawText("#", colNavratriSr, headerY, headerPaint)
+                c.drawText("Expense Detail / Purpose", colNavratriDetail, headerY, headerPaint)
+                c.drawText("Amount (₹)", colNavratriAmount, headerY, headerPaint)
+                c.drawText("Date", colNavratriDate, headerY, headerPaint)
+            } else {
+                c.drawText("#", colMonthlySr, headerY, headerPaint)
+                c.drawText("Expense Detail / Purpose", colMonthlyDetail, headerY, headerPaint)
+                c.drawText("Period", colMonthlyPeriod, headerY, headerPaint)
+                c.drawText("Amount (₹)", colMonthlyAmount, headerY, headerPaint)
+                c.drawText("Date", colMonthlyDate, headerY, headerPaint)
+            }
         }
 
-        drawHeader(canvas)
+        drawHeaderAndTableHeader(canvas)
 
-        var y = 102f
-        val colSr = MARGIN
-        val colDetail = MARGIN + 35f
-        val colPeriod = MARGIN + 320f
-        val colAmount = MARGIN + 410f
-        val colDate = MARGIN + 480f
-
-        // Table Header
-        canvas.drawRect(MARGIN, y - 12f, PAGE_WIDTH - MARGIN, y + 6f, headerBgPaint)
-        canvas.drawText("#", colSr, y, headerPaint)
-        canvas.drawText("Expense Detail / Purpose", colDetail, y, headerPaint)
-        canvas.drawText("Period", colPeriod, y, headerPaint)
-        canvas.drawText("Amount (₹)", colAmount, y, headerPaint)
-        canvas.drawText("Date", colDate, y, headerPaint)
-        y += 18f
-
+        var y = 114f
         var totalExpense = 0.0
         var sr = 1
 
@@ -275,16 +320,23 @@ object PdfExporter {
                 pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
                 page = document.startPage(pageInfo)
                 canvas = page.canvas
-                drawHeader(canvas)
-                y = 102f
+                drawHeaderAndTableHeader(canvas)
+                y = 114f
             }
 
             totalExpense += item.amount
-            canvas.drawText("$sr", colSr, y, rowPaint)
-            canvas.drawText(item.detail.take(40), colDetail, y, rowPaint)
-            canvas.drawText(if (item.monthYear.isNotBlank()) item.monthYear.take(13) else "-", colPeriod, y, rowPaint)
-            canvas.drawText("₹%.2f".format(item.amount), colAmount, y, rowPaint)
-            canvas.drawText(item.date, colDate, y, rowPaint)
+            if (isNavratri) {
+                canvas.drawText("$sr", colNavratriSr, y, rowPaint)
+                canvas.drawText(item.detail.take(50), colNavratriDetail, y, rowPaint)
+                canvas.drawText("₹%.2f".format(item.amount), colNavratriAmount, y, rowPaint)
+                canvas.drawText(item.date, colNavratriDate, y, rowPaint)
+            } else {
+                canvas.drawText("$sr", colMonthlySr, y, rowPaint)
+                canvas.drawText(item.detail.take(40), colMonthlyDetail, y, rowPaint)
+                canvas.drawText(if (item.monthYear.isNotBlank()) item.monthYear.take(13) else "-", colMonthlyPeriod, y, rowPaint)
+                canvas.drawText("₹%.2f".format(item.amount), colMonthlyAmount, y, rowPaint)
+                canvas.drawText(item.date, colMonthlyDate, y, rowPaint)
+            }
             canvas.drawLine(MARGIN, y + 4f, PAGE_WIDTH - MARGIN, y + 4f, linePaint)
             y += 16f
             sr++
@@ -298,8 +350,8 @@ object PdfExporter {
             pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
             page = document.startPage(pageInfo)
             canvas = page.canvas
-            drawHeader(canvas)
-            y = 102f
+            drawHeaderAndTableHeader(canvas)
+            y = 114f
         }
 
         canvas.drawRect(MARGIN, y - 10f, PAGE_WIDTH - MARGIN, y + 26f, headerBgPaint)
@@ -307,7 +359,7 @@ object PdfExporter {
 
         document.finishPage(page)
 
-        return saveAndOpenFile(context, document, fileName, titleText)
+        return saveAndOpenFile(context, document, fileName, reportHeading)
     }
 
     /**
@@ -326,11 +378,18 @@ object PdfExporter {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val displayDate = SimpleDateFormat("dd-MMM-yyyy HH:mm", Locale.getDefault()).format(Date())
 
-        val sanitizedCategory = category.replace(" ", "_")
-        val sanitizedMonth = monthFilter?.replace(" ", "_") ?: "AllMonths"
-        val fileName = "${sanitizedCategory}_Consolidated_Statement_${sanitizedMonth}_$timestamp.pdf"
+        val isNavratri = category.contains("navratri", ignoreCase = true) || category.contains("navaratri", ignoreCase = true)
+        val isMonthly = category.contains("maintenance", ignoreCase = true) || category.contains("monthly", ignoreCase = true)
 
-        val titleText = "$category Consolidated Statement"
+        val reportHeading = when {
+            isNavratri -> "Arya Krishna Society Navaratri Consolidated Statement"
+            isMonthly -> "Arya Krishna Society Monthly Consolidated Statement"
+            else -> "Arya Krishna Society $category Consolidated Statement"
+        }
+
+        val sanitizedHeading = reportHeading.replace(" ", "_")
+        val sanitizedMonth = if (isNavratri) "" else (monthFilter?.let { "_${it.replace(" ", "_")}" } ?: "_AllMonths")
+        val fileName = "${sanitizedHeading}${sanitizedMonth}_$timestamp.pdf"
 
         val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 1).create()
         val page = document.startPage(pageInfo)
@@ -339,11 +398,6 @@ object PdfExporter {
         val titlePaint = Paint().apply {
             color = Color.rgb(21, 101, 192)
             textSize = 15f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        }
-        val categoryPaint = Paint().apply {
-            color = Color.BLACK
-            textSize = 12f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val headerPaint = Paint().apply {
@@ -364,14 +418,13 @@ object PdfExporter {
         }
 
         // Header
-        canvas.drawText("SOCIETY RESIDENTS WELFARE ASSOCIATION", MARGIN, 42f, titlePaint)
-        canvas.drawText(titleText, MARGIN, 58f, categoryPaint)
-        val periodText = if (monthFilter != null) "Period: $monthFilter | Statement As On: $displayDate" else "Period: All Recorded Months | Statement As On: $displayDate"
-        canvas.drawText(periodText, MARGIN, 73f, Paint().apply { color = Color.GRAY; textSize = 9f })
-        canvas.drawLine(MARGIN, 84f, PAGE_WIDTH - MARGIN, 84f, linePaint)
+        canvas.drawText(reportHeading, MARGIN, 46f, titlePaint)
+        val periodText = if (!isNavratri && monthFilter != null) "Period: $monthFilter | Statement As On: $displayDate" else "Statement As On: $displayDate"
+        canvas.drawText(periodText, MARGIN, 64f, Paint().apply { color = Color.GRAY; textSize = 9f })
+        canvas.drawLine(MARGIN, 74f, PAGE_WIDTH - MARGIN, 74f, linePaint)
 
         // KPI Metric Cards
-        val cardY = 100f
+        val cardY = 92f
         val cardW = (PAGE_WIDTH - 2 * MARGIN - 20f) / 3f
 
         // Card 1: Total Collection
@@ -393,7 +446,7 @@ object PdfExporter {
         canvas.drawText("₹%.2f".format(netBalance), card3X + 10f, cardY + 45f, Paint().apply { color = balColor; textSize = 14f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) })
 
         // Block-wise Summary Table
-        var y = 195f
+        var y = 185f
         canvas.drawText("BLOCK-WISE COLLECTION BREAKDOWN", MARGIN, y, headerPaint)
         y += 14f
         canvas.drawLine(MARGIN, y, PAGE_WIDTH - MARGIN, y, linePaint)
@@ -427,7 +480,7 @@ object PdfExporter {
 
         document.finishPage(page)
 
-        return saveAndOpenFile(context, document, fileName, titleText)
+        return saveAndOpenFile(context, document, fileName, reportHeading)
     }
 
     /**
