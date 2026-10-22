@@ -8,7 +8,9 @@ import androidx.lifecycle.viewModelScope
 import com.society.app.data.model.BlockSummary
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.ExpenseEntity
+import com.society.app.data.model.FlatOwnerEntity
 import com.society.app.data.model.FundCategory
+import com.society.app.data.model.UserRole
 import com.society.app.data.repository.SocietyRepository
 import com.society.app.util.CsvExporter
 import com.society.app.util.DateUtil
@@ -30,6 +32,24 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() {
+
+    // === USER ROLE (Admin or Standard User) ===
+    private val _currentUserRole = MutableStateFlow(UserRole.ADMIN)
+    val currentUserRole: StateFlow<UserRole> = _currentUserRole.asStateFlow()
+
+    fun setUserRole(role: UserRole) {
+        _currentUserRole.value = role
+    }
+
+    // === FLAT OWNERS DIRECTORY ===
+    val flatOwners: StateFlow<List<FlatOwnerEntity>> = repository.getAllFlatOwners()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init {
+        viewModelScope.launch {
+            repository.ensureDefaultFlatOwners()
+        }
+    }
 
     // Currently selected category (e.g. "Monthly Maintenance", "Navratri Collection", etc.)
     private val _selectedCategory = MutableStateFlow(FundCategory.CATEGORY_MAINTENANCE)
@@ -184,13 +204,14 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     /**
-     * Parses combined input like "B-504", "B 504", "B504", "A-102" into Pair("B", "504")
+     * Parses combined input like "B-504", "B 504", "B504", "b-504", "b 504", "b504",
+     * "Block B-504", "Wing B 504", "B/504", "B_504" into Pair("B", "504").
      */
     fun parseBlockAndFlat(rawInput: String): Pair<String, String> {
         val trimmed = rawInput.trim()
 
-        // Pattern 1: B-504, B 504, Block B-504, Wing A/102
-        val regexWithSep = Regex("""^(?:Block|Wing)?\s*([A-Za-z0-9]+)\s*[-/_\s]+\s*([0-9A-Za-z]+)$""", RegexOption.IGNORE_CASE)
+        // Pattern 1: B-504, B 504, Block B-504, Wing A/102, B_504, B.504
+        val regexWithSep = Regex("""^(?:Block|Wing)?\s*([A-Za-z0-9]+)\s*[-/_\s.]+\s*([0-9A-Za-z]+)$""", RegexOption.IGNORE_CASE)
         val matchWithSep = regexWithSep.find(trimmed)
         if (matchWithSep != null) {
             val block = matchWithSep.groupValues[1].uppercase()
@@ -198,7 +219,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
             return Pair(block, flat)
         }
 
-        // Pattern 2: B504, A102 (letters followed by numbers)
+        // Pattern 2: B504, A102, b504 (letters followed immediately by digits)
         val regexCombined = Regex("""^([A-Za-z]+)(\d+)$""")
         val matchCombined = regexCombined.find(trimmed)
         if (matchCombined != null) {
@@ -207,17 +228,72 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
             return Pair(block, flat)
         }
 
-        // Fallback: If only flat number is entered
+        // Pattern 3: Fallback - if user enters only number e.g. "504"
         return Pair("General", trimmed)
     }
 
     fun normalizeFlatKey(block: String, flatNo: String): String {
         val cleanBlock = block.trim().uppercase()
         val cleanFlat = flatNo.trim().uppercase().replace(" ", "").replace("-", "")
-        return if (cleanBlock.isNotBlank() && !cleanFlat.startsWith(cleanBlock)) {
+        return if (cleanBlock.isNotBlank() && cleanBlock != "GENERAL" && !cleanFlat.startsWith(cleanBlock)) {
             "$cleanBlock$cleanFlat"
         } else {
             cleanFlat
+        }
+    }
+
+    /**
+     * Looks up registered owner name from flat directory based on flexible user input (e.g. B-504, B 504, B504).
+     */
+    fun lookupOwnerName(rawInput: String): String? {
+        val (block, flatNo) = parseBlockAndFlat(rawInput)
+        if (flatNo.isBlank()) return null
+        val targetKey = "${block.uppercase()}-${flatNo.uppercase()}"
+        val normalizedSimple = "${block.uppercase()}${flatNo.uppercase()}"
+        val currentOwners = flatOwners.value
+
+        val match = currentOwners.find {
+            it.flatKey.equals(targetKey, ignoreCase = true) ||
+            (it.block.equals(block, ignoreCase = true) && it.flatNo.equals(flatNo, ignoreCase = true)) ||
+            "${it.block}${it.flatNo}".equals(normalizedSimple, ignoreCase = true)
+        }
+        return match?.ownerName
+    }
+
+    /**
+     * Admin-only update for flat owner name.
+     */
+    fun updateFlatOwnerName(block: String, flatNo: String, newOwnerName: String) {
+        if (_currentUserRole.value != UserRole.ADMIN) {
+            _statusMessage.value = "Access Denied: Only Admin can update flat owner names."
+            return
+        }
+
+        val cleanName = newOwnerName.trim()
+        if (cleanName.isBlank()) {
+            _statusMessage.value = "Owner name cannot be empty."
+            return
+        }
+
+        viewModelScope.launch {
+            val cleanBlock = block.trim().uppercase()
+            val cleanFlat = flatNo.trim()
+            val flatKey = "$cleanBlock-$cleanFlat"
+
+            val existing = repository.getFlatOwnerByKey(flatKey)
+            if (existing != null) {
+                repository.updateFlatOwnerName(cleanBlock, cleanFlat, cleanName)
+            } else {
+                repository.addOrUpdateFlatOwner(
+                    FlatOwnerEntity(
+                        block = cleanBlock,
+                        flatNo = cleanFlat,
+                        flatKey = flatKey,
+                        ownerName = cleanName
+                    )
+                )
+            }
+            _statusMessage.value = "Owner for Flat $flatKey updated to '$cleanName'."
         }
     }
 
@@ -235,6 +311,11 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
             val finalMonth = if (monthYear.isNotBlank()) monthYear else DateUtil.getCurrentMonthYear()
             val targetKey = normalizeFlatKey(block, flatNo)
 
+            // Auto-resolve owner name if not provided
+            val resolvedOwner = ownerName.trim().ifBlank {
+                lookupOwnerName(rawFlatInput) ?: "Resident"
+            }
+
             val existingList = repository.getExistingCollections(category, finalMonth)
             val existing = existingList.find { normalizeFlatKey(it.block, it.flatNo) == targetKey }
 
@@ -247,7 +328,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                     // Different amount -> Update existing record
                     val updated = existing.copy(
                         amount = amount,
-                        ownerName = ownerName.trim().ifBlank { existing.ownerName },
+                        ownerName = resolvedOwner.ifBlank { existing.ownerName },
                         paymentMode = paymentMode,
                         date = currentDate,
                         timestamp = System.currentTimeMillis()
@@ -263,13 +344,13 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                 monthYear = finalMonth,
                 block = block,
                 flatNo = flatNo,
-                ownerName = ownerName.trim(),
+                ownerName = resolvedOwner,
                 amount = amount,
                 paymentMode = paymentMode,
                 date = currentDate
             )
             repository.addCollection(item)
-            _statusMessage.value = "Saved collection for Flat $flatNo (₹$amount)."
+            _statusMessage.value = "Saved collection for Flat $flatNo (₹$amount) - $resolvedOwner."
         }
     }
 
@@ -500,10 +581,17 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
 
                 val existing = existingMap[key]
 
+                // If ownerName is empty or "Resident", try to auto-resolve from directory
+                val finalOwnerName = if (item.ownerName.isNotBlank() && !item.ownerName.equals("Resident", ignoreCase = true)) {
+                    item.ownerName
+                } else {
+                    lookupOwnerName("$block-$flatNo") ?: item.ownerName.ifBlank { "Resident" }
+                }
+
                 if (existing != null) {
                     val isSameAmount = kotlin.math.abs(existing.amount - item.amount) < 0.01
                     val isSameMode = existing.paymentMode.equals(item.paymentMode, ignoreCase = true)
-                    val isSameName = existing.ownerName.equals(item.ownerName, ignoreCase = true)
+                    val isSameName = existing.ownerName.equals(finalOwnerName, ignoreCase = true)
 
                     if (isSameAmount && isSameMode && isSameName) {
                         // Same record -> Ignore duplicate
@@ -513,7 +601,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                         toUpdate.add(
                             existing.copy(
                                 amount = item.amount,
-                                ownerName = item.ownerName.ifBlank { existing.ownerName },
+                                ownerName = finalOwnerName.ifBlank { existing.ownerName },
                                 paymentMode = item.paymentMode,
                                 date = currentDate,
                                 timestamp = System.currentTimeMillis()
@@ -529,7 +617,7 @@ class SocietyViewModel(private val repository: SocietyRepository) : ViewModel() 
                             monthYear = targetMonthYear,
                             block = block,
                             flatNo = flatNo,
-                            ownerName = item.ownerName.ifBlank { "Resident" },
+                            ownerName = finalOwnerName,
                             amount = item.amount,
                             paymentMode = item.paymentMode,
                             date = currentDate

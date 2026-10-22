@@ -1,10 +1,12 @@
 package com.society.app.data.repository
 
 import android.content.Context
+import com.society.app.data.local.DefaultFlatOwners
 import com.society.app.data.local.SocietyDao
 import com.society.app.data.model.BlockSummary
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.ExpenseEntity
+import com.society.app.data.model.FlatOwnerEntity
 import com.society.app.data.model.FundCategory
 import kotlinx.coroutines.flow.Flow
 import org.json.JSONArray
@@ -224,6 +226,32 @@ class SocietyRepository(
             dao.getExpensesForExportAll(category)
         } else {
             dao.getExpensesForExportByMonth(category, monthYear)
+        }
+    }
+
+    // === FLAT OWNERS ===
+
+    fun getAllFlatOwners(): Flow<List<FlatOwnerEntity>> = dao.getAllFlatOwners()
+
+    fun getFlatOwnersByBlock(block: String): Flow<List<FlatOwnerEntity>> = dao.getFlatOwnersByBlock(block)
+
+    suspend fun getFlatOwner(block: String, flatNo: String): FlatOwnerEntity? = dao.getFlatOwner(block, flatNo)
+
+    suspend fun getFlatOwnerByKey(flatKey: String): FlatOwnerEntity? = dao.getFlatOwnerByKey(flatKey)
+
+    suspend fun updateFlatOwnerName(block: String, flatNo: String, newName: String) {
+        dao.updateOwnerName(block, flatNo, newName.trim())
+    }
+
+    suspend fun addOrUpdateFlatOwner(owner: FlatOwnerEntity): Long {
+        return dao.insertFlatOwner(owner)
+    }
+
+    suspend fun getAllFlatOwnersSync(): List<FlatOwnerEntity> = dao.getAllFlatOwnersSync()
+
+    suspend fun ensureDefaultFlatOwners() {
+        if (dao.getFlatOwnerCount() == 0) {
+            dao.insertFlatOwners(DefaultFlatOwners.LIST)
         }
     }
 }

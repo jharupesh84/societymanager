@@ -13,11 +13,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.TableChart
@@ -34,9 +36,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.FundCategory
+import com.society.app.data.model.UserRole
 import com.society.app.ui.dialogs.AiApiKeyDialog
 import com.society.app.ui.dialogs.BatchCollectionReviewDialog
-import com.society.app.ui.dialogs.PasteTextTableDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 import com.society.app.util.DateUtil
 
@@ -50,8 +52,9 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     val isAiScanning by viewModel.isAiScanning.collectAsState()
     val aiScanError by viewModel.aiScanError.collectAsState()
     val scannedCollections by viewModel.scannedCollections.collectAsState()
-    val scanEngine by viewModel.scanEngine.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
+    val userRole by viewModel.currentUserRole.collectAsState()
+    val flatOwners by viewModel.flatOwners.collectAsState()
 
     LaunchedEffect(statusMessage) {
         statusMessage?.let { msg ->
@@ -61,7 +64,7 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     }
 
     var showApiKeyDialog by remember { mutableStateOf(false) }
-    var showPasteDialog by remember { mutableStateOf(false) }
+    var showUploadCard by remember { mutableStateOf(false) }
 
     var flatInput by remember { mutableStateOf("") }
     var ownerName by remember { mutableStateOf("") }
@@ -79,6 +82,7 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
+            viewModel.setScanEngine(SocietyViewModel.ScanEngine.GEMINI_CLOUD)
             viewModel.scanCollectionImage(context, uri)
         }
     }
@@ -86,6 +90,18 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
     // Live preview of parsed block and flat
     val parsedPreview = remember(flatInput) {
         if (flatInput.isNotBlank()) viewModel.parseBlockAndFlat(flatInput) else null
+    }
+
+    // Auto-lookup registered owner name from flat directory
+    val registeredOwner = remember(flatInput, flatOwners) {
+        if (flatInput.isNotBlank()) viewModel.lookupOwnerName(flatInput) else null
+    }
+
+    // When flat input changes and a registered owner is found, auto-fill ownerName
+    LaunchedEffect(registeredOwner) {
+        if (registeredOwner != null) {
+            ownerName = registeredOwner
+        }
     }
 
     // API Key Dialog
@@ -96,45 +112,29 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
         )
     }
 
-    // Paste Text Table Dialog (Offline Alternative)
-    if (showPasteDialog) {
-        PasteTextTableDialog(
-            onDismiss = { showPasteDialog = false },
-            onParsed = { rows ->
-                showPasteDialog = false
-                viewModel.setScannedCollections(rows)
-            }
-        )
-    }
-
     // AI Scanning Progress Dialog
     if (isAiScanning) {
         AlertDialog(
             onDismissRequest = { /* Prevent dismissing while running */ },
             title = {
-                val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(24.dp),
                         strokeWidth = 2.5.dp,
-                        color = if (isCloud) Color(0xFF1565C0) else Color(0xFF16A34A)
+                        color = Color(0xFF1565C0)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = if (isCloud) "Gemini Cloud AI Scanning" else "On-Device Offline OCR",
+                        text = "Gemini Cloud AI Scanning",
                         fontWeight = FontWeight.Bold,
                         fontSize = 17.sp
                     )
                 }
             },
             text = {
-                val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = if (isCloud)
-                            "Gemini Vision AI is analyzing the image and reading table data..."
-                        else
-                            "Google ML Kit is reading the image directly on your device (100% offline)...",
+                        text = "Gemini Vision AI is analyzing the image and reading table data...",
                         fontSize = 14.sp,
                         color = Color(0xFF334155)
                     )
@@ -157,16 +157,14 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
             text = { Text(errText, fontSize = 14.sp) },
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD) {
-                        Button(
-                            onClick = {
-                                viewModel.clearAiScanState()
-                                showApiKeyDialog = true
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
-                        ) {
-                            Text("Check Key")
-                        }
+                    Button(
+                        onClick = {
+                            viewModel.clearAiScanState()
+                            showApiKeyDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                    ) {
+                        Text("Check Key")
                     }
                     TextButton(onClick = { viewModel.clearAiScanState() }) {
                         Text("Dismiss")
@@ -246,145 +244,126 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
             }
         }
 
-        // Batch Import Card (Supports both Gemini Cloud AI and Offline On-Device OCR)
+        // Upload Option: Hidden behind an "Upload" button until user clicks it
         item {
-            val isCloud = scanEngine == SocietyViewModel.ScanEngine.GEMINI_CLOUD
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isCloud) Color(0xFFF0FDF4) else Color(0xFFF0F9FF)
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+            if (!showUploadCard) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    FilledTonalButton(
+                        onClick = { showUploadCard = true },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = Color(0xFFEFF6FF),
+                            contentColor = Color(0xFF1565C0)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Upload Image / Table",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = Color(0xFF16A34A),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Batch Upload from Image",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color(0xFF14532D)
+                                )
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { showApiKeyDialog = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Key,
+                                        contentDescription = "AI Settings",
+                                        tint = Color(0xFF16A34A),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { showUploadCard = false },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Hide",
+                                        tint = Color(0xFF64748B),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Upload Button (Gemini AI Cloud)
+                        Button(
+                            onClick = {
+                                if (geminiApiKey.isBlank()) {
+                                    showApiKeyDialog = true
+                                } else {
+                                    viewModel.setScanEngine(SocietyViewModel.ScanEngine.GEMINI_CLOUD)
+                                    photoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        ) {
                             Icon(
-                                imageVector = if (isCloud) Icons.Default.AutoAwesome else Icons.Default.TableChart,
+                                imageVector = Icons.Default.TableChart,
                                 contentDescription = null,
-                                tint = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7),
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Batch Import from Image / Table",
+                                text = "Select Image to Scan (Gemini AI)",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = if (isCloud) Color(0xFF14532D) else Color(0xFF075985)
+                                fontSize = 14.sp
                             )
                         }
-
-                        if (isCloud) {
-                            IconButton(
-                                onClick = { showApiKeyDialog = true },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Key,
-                                    contentDescription = "AI Settings",
-                                    tint = Color(0xFF16A34A),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
                     }
-
-                    // Engine Selection FilterChips
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = isCloud,
-                            onClick = { viewModel.setScanEngine(SocietyViewModel.ScanEngine.GEMINI_CLOUD) },
-                            label = {
-                                Text(
-                                    text = "✨ Gemini Cloud AI",
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isCloud) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = !isCloud,
-                            onClick = { viewModel.setScanEngine(SocietyViewModel.ScanEngine.OFFLINE_MLKIT) },
-                            label = {
-                                Text(
-                                    text = "📱 Offline On-Device",
-                                    fontSize = 12.sp,
-                                    fontWeight = if (!isCloud) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    // Primary Action: Upload & Scan Image
-                    Button(
-                        onClick = {
-                            if (isCloud && geminiApiKey.isBlank()) {
-                                showApiKeyDialog = true
-                            } else {
-                                photoPickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isCloud) Color(0xFF16A34A) else Color(0xFF0284C7)
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.TableChart,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isCloud) "📷 Upload Image to Scan (Gemini AI)" else "📷 Upload Image to Scan (Offline OCR)",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-
-                    // Alternative: Paste WhatsApp / Text Table (Offline & Instant)
-                    OutlinedButton(
-                        onClick = { showPasteDialog = true },
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentPaste,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = Color(0xFF475569)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "📋 Paste WhatsApp / Text Table (Offline)",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = Color(0xFF475569)
-                        )
-                    }
-
                 }
             }
         }
@@ -456,11 +435,11 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                         Spacer(modifier = Modifier.height(12.dp))
                     }
 
-                    // Combined Flat input (e.g. B-504)
+                    // Combined Flat input (e.g. B-504, B 504, B504)
                     OutlinedTextField(
                         value = flatInput,
                         onValueChange = { flatInput = it },
-                        label = { Text("Flat (e.g. B-504, A 101, C203)") },
+                        label = { Text("Flat (e.g. B-504, B 504, B504)") },
                         placeholder = { Text("Enter B-504") },
                         leadingIcon = {
                             Icon(imageVector = Icons.Default.Home, contentDescription = null, tint = Color(0xFF1565C0))
@@ -471,25 +450,70 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters)
                     )
 
-                    // Helper label showing parsed Block and Flat
-                    parsedPreview?.let { (block, flat) ->
+                    // Helper label showing registered owner & detected block/flat
+                    if (registeredOwner != null || parsedPreview != null) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Detected: Block $block, Flat $flat",
-                            color = Color(0xFF0284C7),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (registeredOwner != null) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF16A34A),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Registered Owner: $registeredOwner",
+                                    color = Color(0xFF16A34A),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            } else if (parsedPreview != null) {
+                                val (block, flat) = parsedPreview
+                                Text(
+                                    text = "Detected: Block $block, Flat $flat",
+                                    color = Color(0xFF0284C7),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    // Owner Name Field (Locked/Read-only for User, Editable for Admin)
                     OutlinedTextField(
                         value = ownerName,
-                        onValueChange = { ownerName = it },
+                        onValueChange = {
+                            if (userRole == UserRole.ADMIN) {
+                                ownerName = it
+                            }
+                        },
+                        readOnly = userRole == UserRole.USER,
                         label = { Text("Owner / Resident Name") },
+                        placeholder = { Text(registeredOwner ?: "Auto-filled from Flat Directory") },
                         leadingIcon = {
                             Icon(imageVector = Icons.Default.Person, contentDescription = null, tint = Color(0xFF1565C0))
+                        },
+                        trailingIcon = {
+                            if (userRole == UserRole.USER) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "Read-only for User",
+                                    tint = Color(0xFF94A3B8),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
+                        supportingText = {
+                            if (userRole == UserRole.USER) {
+                                Text("Auto-populated from Directory (Only Admin can edit in Owners tab).", fontSize = 11.sp, color = Color(0xFF64748B))
+                            } else if (registeredOwner != null) {
+                                Text("Auto-filled from Flat Directory. Admin can modify here or in Owners tab.", fontSize = 11.sp, color = Color(0xFF0284C7))
+                            }
                         },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -499,10 +523,12 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    // Amount Field
                     OutlinedTextField(
                         value = amountText,
                         onValueChange = { amountText = it },
                         label = { Text("Amount (₹)") },
+                        placeholder = { Text("e.g. 1200") },
                         leadingIcon = {
                             Icon(imageVector = Icons.Default.MonetizationOn, contentDescription = null, tint = Color(0xFF16A34A))
                         },
@@ -552,15 +578,20 @@ fun CollectionScreen(viewModel: SocietyViewModel) {
                     Button(
                         onClick = {
                             val amt = amountText.toDoubleOrNull()
-                            if (flatInput.isBlank() || ownerName.isBlank()) {
-                                errorMessage = "Please enter flat and owner name"
+                            val effectiveOwner = ownerName.trim().ifBlank {
+                                registeredOwner ?: viewModel.lookupOwnerName(flatInput) ?: ""
+                            }
+                            if (flatInput.isBlank()) {
+                                errorMessage = "Please enter flat number (e.g. B-504)"
+                            } else if (effectiveOwner.isBlank()) {
+                                errorMessage = "Please enter resident / owner name"
                             } else if (amt == null || amt <= 0.0) {
                                 errorMessage = "Enter a valid positive amount"
                             } else {
                                 errorMessage = null
                                 viewModel.addCollectionFromCombinedInput(
                                     rawFlatInput = flatInput,
-                                    ownerName = ownerName,
+                                    ownerName = effectiveOwner,
                                     amount = amt,
                                     paymentMode = paymentMode,
                                     category = selectedCategory,

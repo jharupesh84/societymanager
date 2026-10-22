@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.society.app.data.model.FundCategory
+import com.society.app.data.model.UserRole
 import com.society.app.ui.dialogs.AiApiKeyDialog
 import com.society.app.ui.viewmodel.SocietyViewModel
 
@@ -31,6 +33,7 @@ fun MainScreen(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val selectedCategory by viewModel.selectedCategory.collectAsState()
+    val userRole by viewModel.currentUserRole.collectAsState()
 
     val isCustomEvent = selectedCategory != FundCategory.CATEGORY_MAINTENANCE &&
             selectedCategory != FundCategory.CATEGORY_NAVRATRI
@@ -127,11 +130,26 @@ fun MainScreen(
                                 }
                             }
                         }
-                        Text(
-                            text = "Society Manager Portal",
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.85f)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Society Manager Portal",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.85f)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (userRole == UserRole.ADMIN) Color(0xFFFEF3C7) else Color(0xFFE0E7FF)
+                            ) {
+                                Text(
+                                    text = if (userRole == UserRole.ADMIN) "ADMIN" else "USER",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (userRole == UserRole.ADMIN) Color(0xFFB45309) else Color(0xFF3730A3),
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -217,6 +235,17 @@ fun MainScreen(
                         indicatorColor = headerColor.copy(alpha = 0.12f)
                     )
                 )
+                NavigationBarItem(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    icon = { Icon(Icons.Default.People, contentDescription = "Flat Directory") },
+                    label = { Text("Owners", fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = headerColor,
+                        selectedTextColor = headerColor,
+                        indicatorColor = headerColor.copy(alpha = 0.12f)
+                    )
+                )
             }
         }
     ) { innerPadding ->
@@ -225,6 +254,7 @@ fun MainScreen(
                 0 -> CollectionScreen(viewModel = viewModel)
                 1 -> ExpenseScreen(viewModel = viewModel)
                 2 -> ReportScreen(viewModel = viewModel)
+                3 -> FlatDirectoryScreen(viewModel = viewModel)
             }
         }
     }

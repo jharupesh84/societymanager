@@ -29,10 +29,11 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.society.app.data.model.UserRole
 
 @Composable
 fun LoginScreen(
-    onLoginSuccess: (rememberMe: Boolean) -> Unit
+    onLoginSuccess: (rememberMe: Boolean, role: UserRole) -> Unit
 ) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -52,12 +53,21 @@ fun LoginScreen(
             return
         }
 
-        // Static credentials check: User = Admin, Password = Admin123
-        if (cleanUser.equals("Admin", ignoreCase = true) && cleanPass == "Admin123") {
-            errorMessage = null
-            onLoginSuccess(rememberMe)
-        } else {
-            errorMessage = "Invalid username or password. Please try again."
+        // Credentials check:
+        // Admin: User = Admin, Password = Admin123 (Full privileges including editing flat owners)
+        // User:  User = User,  Password = User123  (All features EXCEPT editing flat owner names)
+        when {
+            cleanUser.equals("Admin", ignoreCase = true) && cleanPass == "Admin123" -> {
+                errorMessage = null
+                onLoginSuccess(rememberMe, UserRole.ADMIN)
+            }
+            cleanUser.equals("User", ignoreCase = true) && cleanPass == "User123" -> {
+                errorMessage = null
+                onLoginSuccess(rememberMe, UserRole.USER)
+            }
+            else -> {
+                errorMessage = "Invalid credentials. Use Admin (Admin123) or User (User123)."
+            }
         }
     }
 
@@ -140,19 +150,19 @@ fun LoginScreen(
                     .padding(24.dp)
             ) {
                 Text(
-                    text = "Admin Sign In",
+                    text = "Sign In",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF1E293B)
                 )
 
                 Text(
-                    text = "Enter committee credentials to continue",
+                    text = "Sign in with Admin or User account",
                     fontSize = 12.sp,
                     color = Color(0xFF64748B)
                 )
 
-                Spacer(modifier = Modifier.height(22.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // Username Input
                 OutlinedTextField(
@@ -162,7 +172,7 @@ fun LoginScreen(
                         errorMessage = null
                     },
                     label = { Text("Username") },
-                    placeholder = { Text("Admin") },
+                    placeholder = { Text("Admin or User") },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Person,
@@ -248,7 +258,7 @@ fun LoginScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Submit Button
                 Button(
@@ -266,14 +276,39 @@ fun LoginScreen(
                         color = Color.White
                     )
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Role hint box
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFFF1F5F9),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Login Credentials:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF475569)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Admin: Admin / Admin123 (Full Access + Edit Flat Owners)\n• User: User / User123 (Standard Access - Read-Only Flat Owners)",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B),
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(30.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Security Notice Footer
         Text(
-            text = "Society Manager System\nAuthorized Committee Access Only",
+            text = "Society Manager System\nAuthorized Access Only",
             fontSize = 12.sp,
             color = Color(0xFF94A3B8),
             lineHeight = 16.sp,

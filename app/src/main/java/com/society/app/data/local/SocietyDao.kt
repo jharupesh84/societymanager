@@ -9,6 +9,7 @@ import androidx.room.Update
 import com.society.app.data.model.BlockSummary
 import com.society.app.data.model.CollectionEntity
 import com.society.app.data.model.ExpenseEntity
+import com.society.app.data.model.FlatOwnerEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -171,4 +172,36 @@ interface SocietyDao {
 
     @Query("DELETE FROM expenses WHERE category = :category")
     suspend fun deleteExpensesByCategory(category: String)
+
+    // === FLAT OWNERS ===
+
+    @Query("SELECT * FROM flat_owners ORDER BY block ASC, CAST(flatNo AS INTEGER) ASC, flatNo ASC")
+    fun getAllFlatOwners(): Flow<List<FlatOwnerEntity>>
+
+    @Query("SELECT * FROM flat_owners WHERE block = :block ORDER BY CAST(flatNo AS INTEGER) ASC, flatNo ASC")
+    fun getFlatOwnersByBlock(block: String): Flow<List<FlatOwnerEntity>>
+
+    @Query("SELECT * FROM flat_owners WHERE flatKey = :flatKey LIMIT 1")
+    suspend fun getFlatOwnerByKey(flatKey: String): FlatOwnerEntity?
+
+    @Query("SELECT * FROM flat_owners WHERE block = :block AND flatNo = :flatNo LIMIT 1")
+    suspend fun getFlatOwner(block: String, flatNo: String): FlatOwnerEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFlatOwner(owner: FlatOwnerEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFlatOwners(owners: List<FlatOwnerEntity>): List<Long>
+
+    @Update
+    suspend fun updateFlatOwner(owner: FlatOwnerEntity)
+
+    @Query("UPDATE flat_owners SET ownerName = :newName WHERE block = :block AND flatNo = :flatNo")
+    suspend fun updateOwnerName(block: String, flatNo: String, newName: String)
+
+    @Query("SELECT COUNT(*) FROM flat_owners")
+    suspend fun getFlatOwnerCount(): Int
+
+    @Query("SELECT * FROM flat_owners ORDER BY block ASC, CAST(flatNo AS INTEGER) ASC, flatNo ASC")
+    suspend fun getAllFlatOwnersSync(): List<FlatOwnerEntity>
 }

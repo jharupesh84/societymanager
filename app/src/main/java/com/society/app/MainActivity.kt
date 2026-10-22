@@ -37,9 +37,10 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (!isLoggedIn) {
-                    // Step 1: Admin Login Screen
+                    // Step 1: Login Screen (Admin or User)
                     LoginScreen(
-                        onLoginSuccess = { _ ->
+                        onLoginSuccess = { _, role ->
+                            viewModel.setUserRole(role)
                             isLoggedIn = true
                             showSelectionScreen = true
                         }
